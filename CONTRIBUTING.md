@@ -19,14 +19,14 @@ host from source so code changes don't need an image rebuild.
 ```bash
 cd mash-pa
 uv sync                              # create the venv
-docker compose up -d db              # Postgres only, published on 127.0.0.1:5433
+docker compose up -d db              # Postgres only, published on 127.0.0.1:5434
 cp .env.example .env
 ```
 
 In `.env`, set `ANTHROPIC_API_KEY` and uncomment the local-development line:
 
 ```
-MASH_DATABASE_URL=postgresql://mash:mash@127.0.0.1:5433/mash_pa
+MASH_DATABASE_URL=postgresql://mash:mash@127.0.0.1:5434/mash_pa
 ```
 
 The database is `mash_pa` with an underscore — everything else in this
@@ -44,18 +44,16 @@ characters.
 ### Run
 
 ```bash
-uv run pa serve
+mash host serve --host-app pa.spec:build_pool --port 8002
 ```
-
-(`mash host serve --host-app pa.spec:build_pool --port 8000` is the
-stock-CLI equivalent.) Then, in another terminal:
+Then, in another terminal:
 
 ```bash
-uv run pa browse                  # the pool + configured hosts
-uv run pa repl --host assistant   # enter the default composition
+pa browse                  # the pool + configured hosts
+pa repl --host assistant   # enter the default composition
 ```
 
-The CLI defaults to `http://127.0.0.1:8000`.
+The CLI defaults to `http://127.0.0.1:8002`.
 
 ## The Docker Image
 

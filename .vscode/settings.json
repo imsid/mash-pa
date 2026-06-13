@@ -1,0 +1,5 @@
+{
+    "git.ignoreLimitWarning": true,
+    "makefile.configureOnOpen": false,
+    "pylint.args": ["--disable=C0116,W0718,C0301"]
+}

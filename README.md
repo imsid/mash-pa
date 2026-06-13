@@ -39,7 +39,7 @@ omit it and the agent stays in the catalog and explains how to configure
 itself. The `pa-data` volume keeps the database and your ledger durable
 across container restarts and upgrades.
 
-The CLI defaults to `http://127.0.0.1:8000`; point it at a store running
+The CLI defaults to `http://127.0.0.1:8002`; point it at a store running
 elsewhere with `--api-base-url` or `PA_API_BASE_URL`. To bring your own
 Postgres instead of the embedded one, set `MASH_DATABASE_URL` on the
 container — that's all the [docker compose setup](CONTRIBUTING.md) does.

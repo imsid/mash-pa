@@ -9,7 +9,7 @@ services:
       # Published for the local dev loop (`docker compose up -d db` +
       # `pa serve` on the host machine); the pa service uses the
       # internal network either way.
-      - "127.0.0.1:5433:5432"
+      - "127.0.0.1:5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

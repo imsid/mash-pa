@@ -21,7 +21,7 @@ from . import store
 
 PA_DEFAULT_API_BASE_URL = os.environ.get(
     "PA_API_BASE_URL",
-    "http://127.0.0.1:8000",
+    "http://127.0.0.1:8002",
 )
 
 
@@ -185,9 +185,7 @@ def _workflow_rows(workflows: list[dict[str, Any]]) -> list[list[str]]:
                 rendered_tasks.append(
                     f"{task.get('task_id') or ''} -> {task.get('agent_id') or ''}"
                 )
-        rows.append(
-            [str(workflow.get("workflow_id") or ""), ", ".join(rendered_tasks)]
-        )
+        rows.append([str(workflow.get("workflow_id") or ""), ", ".join(rendered_tasks)])
     return rows
 
 
@@ -251,9 +249,7 @@ def _run_repl(
     if not args.agent and not args.target_host:
         renderer.info("Pick a host to enter:")
         _render_configured_hosts(renderer)
-        renderer.info(
-            "Run `pa repl --host <id>`, or `pa compose` to create one."
-        )
+        renderer.info("Run `pa repl --host <id>`, or `pa compose` to create one.")
         return 0
 
     if args.agent:
