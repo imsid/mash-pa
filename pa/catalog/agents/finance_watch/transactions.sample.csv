@@ -1,0 +1,70 @@
+date,merchant,category,amount
+2026-03-01,CityRent,housing,1850.00
+2026-03-02,GreenGrocer,groceries,72.40
+2026-03-03,GymPro,fitness,39.99
+2026-03-04,Brew & Bean,coffee,5.75
+2026-03-06,Metro Transit,transport,15.00
+2026-03-08,Pizzeria Roma,dining,28.50
+2026-03-09,GreenGrocer,groceries,64.15
+2026-03-12,MusicNow,subscriptions,5.99
+2026-03-13,Metro Transit,transport,15.00
+2026-03-14,PowerGrid,utilities,82.30
+2026-03-16,GreenGrocer,groceries,88.90
+2026-03-17,Brew & Bean,coffee,6.25
+2026-03-20,Metro Transit,transport,15.00
+2026-03-21,TechMart,electronics,34.99
+2026-03-22,Noodle House,dining,23.80
+2026-03-23,GreenGrocer,groceries,59.60
+2026-03-26,BookNook,books,18.95
+2026-03-27,Metro Transit,transport,15.00
+2026-03-28,CloudStream,subscriptions,9.99
+2026-03-30,GreenGrocer,groceries,76.25
+2026-04-01,CityRent,housing,1850.00
+2026-04-02,Brew & Bean,coffee,5.75
+2026-04-03,GymPro,fitness,39.99
+2026-04-04,GreenGrocer,groceries,69.80
+2026-04-06,Metro Transit,transport,15.00
+2026-04-08,RideShare,transport,17.45
+2026-04-11,GreenGrocer,groceries,81.30
+2026-04-12,MusicNow,subscriptions,5.99
+2026-04-13,Metro Transit,transport,15.00
+2026-04-14,PowerGrid,utilities,79.10
+2026-04-15,Pizzeria Roma,dining,31.20
+2026-04-18,GreenGrocer,groceries,66.75
+2026-04-19,Brew & Bean,coffee,6.25
+2026-04-20,Metro Transit,transport,15.00
+2026-04-25,TechMart,electronics,49.99
+2026-04-25,GreenGrocer,groceries,73.10
+2026-04-27,Metro Transit,transport,15.00
+2026-04-28,CloudStream,subscriptions,9.99
+2026-04-29,Noodle House,dining,26.40
+2026-05-01,CityRent,housing,1850.00
+2026-05-02,GreenGrocer,groceries,70.55
+2026-05-03,GymPro,fitness,59.99
+2026-05-05,Brew & Bean,coffee,5.75
+2026-05-06,Metro Transit,transport,15.00
+2026-05-09,GreenGrocer,groceries,85.20
+2026-05-11,RideShare,transport,22.10
+2026-05-12,MusicNow,subscriptions,5.99
+2026-05-13,Metro Transit,transport,15.00
+2026-05-14,PowerGrid,utilities,84.60
+2026-05-16,GreenGrocer,groceries,62.85
+2026-05-17,Pizzeria Roma,dining,29.95
+2026-05-20,Metro Transit,transport,15.00
+2026-05-21,BookNook,books,24.50
+2026-05-23,GreenGrocer,groceries,77.95
+2026-05-24,Brew & Bean,coffee,6.25
+2026-05-27,Metro Transit,transport,15.00
+2026-05-30,CloudStream,subscriptions,9.99
+2026-05-30,CloudStream,subscriptions,9.99
+2026-05-31,GreenGrocer,groceries,68.40
+2026-06-01,CityRent,housing,1850.00
+2026-06-03,GymPro,fitness,59.99
+2026-06-03,Metro Transit,transport,15.00
+2026-06-05,XJ-PAY*4421,uncategorized,63.20
+2026-06-06,GreenGrocer,groceries,74.65
+2026-06-07,Brew & Bean,coffee,5.75
+2026-06-08,TechMart,electronics,899.00
+2026-06-09,Noodle House,dining,25.10
+2026-06-10,Metro Transit,transport,15.00
+2026-06-11,GreenGrocer,groceries,80.30

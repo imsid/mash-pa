@@ -1,0 +1,33 @@
+[project]
+name = "mash-pa"
+version = "0.1.0"
+description = "PA — a self-hosted app store for personal agents, built with the Mash SDK."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Proprietary"}
+authors = [{ name = "imsid" }]
+
+dependencies = [
+  "mashpy>=0.5.3",
+  "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+pa = "pa.cli:main"
+
+[project.optional-dependencies]
+dev = [
+  "pyinstaller>=6.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["pa*"]
+
+[tool.setuptools.package-data]
+"pa" = [
+  "catalog/agents/finance_watch/*.csv",
+]
