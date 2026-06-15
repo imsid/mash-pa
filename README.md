@@ -51,8 +51,13 @@ metadata that powers both the storefront and delegation routing:
 
 | Agent | Listing |
 |-------|---------|
+| `digest-curator` | Curates the public web into Axios-style digests on your topics — every claim linked. Runs freeform or over your saved topics |
+| `digest-concierge` | Manages your digest interests — add/edit/remove topics and compose named digest bundles |
 | `gh-brief` | Your GitHub world — reviews requested, open PRs, assigned issues — via the GitHub MCP server with a read-only tool allowlist |
 | `finance-watch` | A local transactions ledger — odd charges, duplicates, subscription drift. No credentials, no network; data never leaves the deployment |
+
+Two workflows ship alongside them: `interview-user` (the onboarding interview)
+and `run-digest` (generate a digest over a saved bundle).
 
 ## Composing Teams
 
@@ -61,28 +66,69 @@ the deployment's. `pa browse` shows the pool and your configured hosts;
 `pa compose` creates or replaces one; `pa repl --host` enters it.
 
 The host config file (`~/.pa/hosts.json`) ships with one default entry, the
-**`assistant`** host: `gh-brief` as the primary with `finance-watch` as a
-subagent. In its REPL, GitHub questions are answered directly and
-spending/transaction questions are delegated to `finance-watch`:
+**`assistant`** host: `digest-curator` as the primary, with `digest-concierge`,
+`finance-watch`, and `gh-brief` as subagents, and the `interview-user` and
+`run-digest` workflows attached. In its REPL, digest requests are handled
+directly and interest edits, spending, and GitHub questions are delegated:
 
 ```text
-> what needs my review today?
+> build me a digest on AI agents from OpenAI, Anthropic, and Google
+> add a topic that follows NPR headlines
 > any duplicate charges this month?
 ```
 
-Compose your own mix — e.g. each agent on its own bare host — whenever you
-want:
+If you already have a `~/.pa/hosts.json` from an earlier version, re-create the
+default layout with:
 
 ```bash
-pa compose money --primary finance-watch
-pa repl --host money
+pa compose assistant --primary digest-curator \
+  --subagents digest-concierge \
+  --workflows interview-user,run-digest
+```
+
+```bash
+pa repl --host assistant
 ```
 
 Inside `pa repl --host <id>` everything is scoped to that host: plain
 messages route to its primary, delegation is limited to its subagents, and
 `/agents` lists exactly the team you composed.
 
+## Digests
+
+The digest agents learn your interests once, then turn fresh web content into an
+Axios-style ("Smart Brevity") digest — a "1 big thing" lead, then per item a
+headline, *why it matters*, a few bullets, and a source link.
+
+```text
+> /workflow run interview-user                 # short interview, saves your topics
+> /workflow run run-digest                      # generate your default digest
+> /workflow run run-digest --input {"digest_id":"work"}   # a named bundle
+> build me a digest on RISC-V servers           # freeform, any topic, any time
+> /interests                                    # view saved topics and bundles
+> /interests reset                              # clear and re-run the interview
+> /digest                                       # the latest generated digest
+> /digest list 5                                # recent digests
+> /digest search agents                         # full-text search past digests
+```
+
+Topics carry trusted `sources` (a domain allowlist) and a recency window; the
+curator searches those first and falls back to the open web when they're thin,
+skipping items already surfaced. Topics, named bundles, and every generated
+digest are stored in the deployment's Postgres database (`MASH_DATABASE_URL`,
+required); web search/fetch use Parallel AI (`PARALLEL_API_KEY`, optional — the
+free anonymous tier works without it). `/digest` reads the database directly, so
+run it where `MASH_DATABASE_URL` is reachable.
+
 ## The Agents
+
+**Digest Curator** is the `assistant` primary: it curates the public web into
+Axios-style digests on your topics (or any freeform topic), citing every claim,
+and records each digest for `/digest` to view and search. It delegates interest
+edits to Digest Concierge.
+
+**Digest Concierge** manages what your digests cover — add, edit, or remove
+topics and compose named bundles — over the shared digest store.
 
 **GH Brief** prepares a compact brief of your GitHub world — PRs awaiting
 your review, your open PRs, assigned issues, recent repo activity — through
@@ -106,6 +152,10 @@ of the box.
 | `pa hosts` | List the hosts in your config file |
 | `pa repl --host <id>` | Enter a host's REPL, scoped to its team (`--agent <id>` for one bare agent) |
 | `pa serve` | Run your own PA host from a source install |
+
+Inside a host REPL, alongside the stock mash commands (`/workflow`, `/agents`,
+`/feedback`, …), PA adds `/interests` (view or reset your digest interests) and
+`/digest` (view, list, or search past digests).
 
 The stock mash CLI drives the same deployment: `mash connect` /
 `mash compose` / `mash repl`.

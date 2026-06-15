@@ -9,11 +9,13 @@ with `pa repl --host <id>` — the REPL is scoped to that host.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import importlib
 import os
 from typing import Any, Sequence
 
 from mash.cli.client import MashHostClient
+from mash.cli.commands import Command
 from mash.cli.render import RichRenderer
 from mash.cli.shell import MashRemoteShell, ShellTarget
 
@@ -240,6 +242,128 @@ def _run_hosts(renderer: RichRenderer) -> int:
     return 0
 
 
+def _interests_command(shell: MashRemoteShell, ctx: Any, args: list[str]) -> None:
+    """View digest interests, or reset and re-run the onboarding interview.
+
+    Deployment-agnostic: routes through the agent/workflow rather than touching
+    Postgres directly. Viewing asks the primary to list interests; reset runs the
+    `interview-user` workflow with `reset` so it clears and re-interviews.
+    """
+    if not ctx.host_id:
+        ctx.renderer.error("/interests needs a host. Enter one with `pa repl --host <id>`.")
+        return
+    subcommand = args[0].strip().lower() if args else "show"
+    if subcommand in ("", "show", "view", "list"):
+        shell.handle_repl_message(
+            ctx, "List my saved digest topics and bundles."
+        )
+        return
+    if subcommand == "reset":
+        workflow_cmd = shell.command_registry.get("workflow")
+        if workflow_cmd is None:
+            ctx.renderer.error("Workflow command unavailable.")
+            return
+        ctx.renderer.info("Resetting interests and re-running onboarding…")
+        workflow_cmd.handler(
+            ctx, ["run", "interview-user", "--input", '{"reset": true}']
+        )
+        return
+    ctx.renderer.error("Usage: /interests [show|reset]")
+
+
+def _digest_command(ctx: Any, args: list[str]) -> None:
+    """View past digests directly from the Postgres store (no agent).
+
+    `/digest` latest · `/digest list [N]` · `/digest <run_id>` ·
+    `/digest search <query>`.
+    """
+    # Imported lazily so the CLI (and its PyInstaller binary) does not pull in
+    # psycopg and the catalog unless a digest command is actually used.
+    from .catalog.digest import _store as digest_store  # noqa: PLC0415  # pylint: disable=import-outside-toplevel
+
+    renderer = ctx.renderer
+
+    def _run_table(rows: list[dict]) -> None:
+        renderer.table(
+            ["ID", "Digest", "Title", "Generated"],
+            [
+                [
+                    str(r["id"]),
+                    str(r["digest_id"] or "(freeform)"),
+                    str(r["title"]),
+                    str(r["generated_at"]),
+                ]
+                for r in rows
+            ],
+        )
+
+    def _render_run(run: dict) -> None:
+        sections = asyncio.run(digest_store.get_run_sections(int(run["id"])))
+        parts = [f"# {run['title']}"]
+        lead = str(run.get("lead") or "").strip()
+        if lead:
+            parts.append(f"**1 big thing:** {lead}")
+        parts.extend(str(s["content"]).strip() for s in sections)
+        renderer.markdown("\n\n".join(parts))
+
+    try:
+        sub = args[0].strip().lower() if args else ""
+        if sub == "list":
+            limit = int(args[1]) if len(args) > 1 and args[1].isdigit() else 10
+            rows = asyncio.run(digest_store.list_recent_runs(limit))
+            if not rows:
+                renderer.info("No digests yet. Generate one with `/workflow run run-digest`.")
+                return
+            _run_table(rows)
+            return
+        if sub == "search":
+            query = " ".join(args[1:]).strip()
+            if not query:
+                renderer.error("Usage: /digest search <query>")
+                return
+            rows = asyncio.run(digest_store.search_runs(query, 10))
+            if not rows:
+                renderer.info(f"No digests match '{query}'.")
+                return
+            _run_table(rows)
+            return
+        if sub.isdigit():
+            run = asyncio.run(digest_store.get_run(int(sub)))
+            if run is None:
+                renderer.error(f"No digest with id {sub}.")
+                return
+            _render_run(run)
+            return
+        if sub:
+            renderer.error("Usage: /digest [list N | search <query> | <run_id>]")
+            return
+        latest = asyncio.run(digest_store.latest_run())
+        if latest is None:
+            renderer.info("No digests yet. Generate one with `/workflow run run-digest`.")
+            return
+        _render_run(latest)
+    except Exception as exc:
+        renderer.error(f"/digest failed: {exc}")
+
+
+def _register_pa_commands(shell: MashRemoteShell) -> None:
+    """Register PA-specific slash commands on the REPL shell."""
+    shell.register_command(
+        Command(
+            name="interests",
+            help="View your digest interests, or reset them (/interests [show|reset])",
+            handler=lambda ctx, args: _interests_command(shell, ctx, args),
+        )
+    )
+    shell.register_command(
+        Command(
+            name="digest",
+            help="View past digests (/digest [list N | search <query> | <run_id>])",
+            handler=_digest_command,
+        )
+    )
+
+
 def _run_repl(
     client: MashHostClient,
     renderer: RichRenderer,
@@ -271,6 +395,7 @@ def _run_repl(
     # /agents and /workflow are host-scoped natively by mash >= 0.5.3
     # (default_commands reads ctx.host_id).
     shell = MashRemoteShell(client, target)
+    _register_pa_commands(shell)
     shell.run()
     return 0
 

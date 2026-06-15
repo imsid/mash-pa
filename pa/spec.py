@@ -14,7 +14,7 @@ from typing import Sequence
 from mash.api import MashHostConfig, run_host
 from mash.runtime import AgentPool, HostBuilder
 
-from .catalog import CATALOG
+from .catalog import CATALOG, build_digest_workflow_specs
 
 
 def build_pool(workspace_root: Path | None = None) -> AgentPool:
@@ -31,6 +31,9 @@ def build_pool(workspace_root: Path | None = None) -> AgentPool:
         builder.agent(
             entry.create_spec(workspace_root=ws), metadata=entry.build_metadata()
         )
+    # Digest workflows; their workflow-only task agents register automatically.
+    for workflow in build_digest_workflow_specs():
+        builder.workflow(workflow)
     return builder.build()
 
 
