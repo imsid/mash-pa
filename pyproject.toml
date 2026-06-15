@@ -8,7 +8,8 @@ license = {text = "Proprietary"}
 authors = [{ name = "imsid" }]
 
 dependencies = [
-  "mashpy>=0.5.3",
+  "mashpy>=0.6.0",
+  "psycopg[binary]>=3.1",
   "python-dotenv>=1.0.0",
 ]
 
@@ -30,4 +31,6 @@ include = ["pa*"]
 [tool.setuptools.package-data]
 "pa" = [
   "catalog/agents/finance_watch/*.csv",
+  "catalog/digest/skills/onboard-topics/SKILL.md",
+  "catalog/digest/skills/curate-digest/SKILL.md",
 ]

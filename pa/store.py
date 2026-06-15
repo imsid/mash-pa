@@ -18,9 +18,9 @@ from typing import Any, Iterable
 # user-editable configuration, not code.
 DEFAULT_HOSTS: dict[str, dict[str, Any]] = {
     "assistant": {
-        "primary": "gh-brief",
-        "subagents": ["finance-watch"],
-        "workflows": [],
+        "primary": "digest-curator",
+        "subagents": ["digest-concierge", "finance-watch", "gh-brief"],
+        "workflows": ["interview-user", "run-digest"],
     },
 }
 
