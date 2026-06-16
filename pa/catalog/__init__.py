@@ -21,7 +21,7 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 from mash.runtime import AgentMetadata, AgentSpec  # noqa: E402
 
 from . import digest  # noqa: E402
-from .agents import finance_watch, gh_brief  # noqa: E402
+from .agents import finance_watch  # noqa: E402
 from .digest import build_digest_workflow_specs  # noqa: E402
 
 
@@ -44,11 +44,6 @@ CATALOG: tuple[CatalogEntry, ...] = (
         digest.DIGEST_CONCIERGE_AGENT_ID,
         digest.digest_concierge.create_spec,
         digest.digest_concierge.build_metadata,
-    ),
-    CatalogEntry(
-        gh_brief.GH_BRIEF_AGENT_ID,
-        gh_brief.create_spec,
-        gh_brief.build_metadata,
     ),
     CatalogEntry(
         finance_watch.FINANCE_WATCH_AGENT_ID,

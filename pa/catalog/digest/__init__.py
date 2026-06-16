@@ -10,7 +10,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .agents import digest_concierge, digest_curator, interview_user, run_digest
+from .agents import (
+    digest_concierge,
+    digest_curator,
+    github_digest,
+    interview_user,
+    run_digest,
+)
 
 if TYPE_CHECKING:
     from mash.workflows import WorkflowSpec
@@ -19,6 +25,7 @@ DIGEST_CURATOR_AGENT_ID = digest_curator.DIGEST_CURATOR_AGENT_ID
 DIGEST_CONCIERGE_AGENT_ID = digest_concierge.DIGEST_CONCIERGE_AGENT_ID
 INTERVIEW_USER_WORKFLOW_ID = interview_user.INTERVIEW_USER_WORKFLOW_ID
 RUN_DIGEST_WORKFLOW_ID = run_digest.RUN_DIGEST_WORKFLOW_ID
+GITHUB_DIGEST_WORKFLOW_ID = github_digest.GITHUB_DIGEST_WORKFLOW_ID
 
 
 def build_digest_workflow_specs() -> "list[WorkflowSpec]":
@@ -26,12 +33,14 @@ def build_digest_workflow_specs() -> "list[WorkflowSpec]":
     return [
         interview_user.build_workflow_spec(),
         run_digest.build_workflow_spec(),
+        github_digest.build_workflow_spec(),
     ]
 
 
 __all__ = [
     "DIGEST_CONCIERGE_AGENT_ID",
     "DIGEST_CURATOR_AGENT_ID",
+    "GITHUB_DIGEST_WORKFLOW_ID",
     "INTERVIEW_USER_WORKFLOW_ID",
     "RUN_DIGEST_WORKFLOW_ID",
     "build_digest_workflow_specs",
