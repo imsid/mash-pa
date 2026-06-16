@@ -109,7 +109,7 @@ web-search it — resolve and fetch it directly:
 
 1. Call `fetch_rss_items` with the `kind` (`youtube_channel` or `podcast`), the
    `source` (the name/handle/URL the user gave), and an optional `max_items`. It
-   resolves the feed (Podcast Index / YouTube Data API) and returns the latest
+   resolves the feed (Apple Podcasts / YouTube Data API) and returns the latest
    items with best-effort `content`. Only if it errors (e.g. resolution keys not
    configured) fall back to an open `web_search`.
 2. Write one Axios card exactly as for a followed feed (heading = the returned

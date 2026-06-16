@@ -1,18 +1,18 @@
 """RSS connectors for the digest agents — YouTube creators and podcasts.
 
 Everything here is RSS-first: in steady state we only fetch and parse public RSS
-feeds (no auth, no quota). The official APIs are touched **once**, at subscribe
-time, to resolve a human reference (a YouTube `@handle`, a podcast name or RSS
-URL) into a canonical id and the feed URL we then poll forever:
+feeds (no auth, no quota). A resolver is touched **once**, at subscribe time, to
+turn a human reference into a canonical id and the feed URL we then poll forever:
 
 - YouTube: the Data API resolves a handle/name to a `UC…` channel id; the feed is
   the first-party `feeds/videos.xml?channel_id=…`. A raw `UC…` id (or a
   `/channel/UC…` URL) resolves with no API key at all.
-- Podcasts: the Podcast Index API resolves a show name or RSS URL to its feed
-  URL. Spotify-exclusive shows have no public RSS and are out of scope.
+- Podcasts: Apple's iTunes Search API resolves a show name or Apple Podcasts URL
+  to its RSS feed — no key, no signup — and a direct RSS feed URL is used as-is.
+  Spotify-exclusive shows have no public RSS and are out of scope.
 
-Resolution raises a clear, actionable error when its key is missing, mirroring
-how `_github` explains an unconfigured connection. Fetch and enrich never raise
+YouTube handle/name resolution raises a clear, actionable error when
+`YOUTUBE_API_KEY` is missing; podcasts need no key. Fetch and enrich never raise
 for missing content — enrichment is best-effort and degrades to the feed's own
 summary so a flaky transcript never breaks a digest.
 
@@ -22,10 +22,8 @@ through `asyncio.to_thread` so the agent event loop is not blocked.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
-import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -37,11 +35,16 @@ PODCAST_KIND = "podcast"
 
 YOUTUBE_FEED_TMPL = "https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
 YOUTUBE_API = "https://www.googleapis.com/youtube/v3"
-PODCAST_INDEX_API = "https://api.podcastindex.org/api/1.0"
+# Apple's iTunes Search API resolves a podcast name/id to its RSS feedUrl with
+# no key and no signup — the podcast resolver.
+ITUNES_SEARCH = "https://itunes.apple.com/search"
+ITUNES_LOOKUP = "https://itunes.apple.com/lookup"
 
 # A YouTube channel id is the literal "UC" followed by 22 url-safe base64 chars.
 _CHANNEL_ID_RE = re.compile(r"(UC[0-9A-Za-z_-]{22})")
 _HANDLE_RE = re.compile(r"@([0-9A-Za-z._-]+)")
+# An Apple Podcasts URL ends in .../id1234567890.
+_APPLE_ID_RE = re.compile(r"id(\d+)")
 _HTTP_TIMEOUT = httpx.Timeout(20.0)
 _USER_AGENT = "mash-pa-digest/0.1 (+https://github.com/imsid/mash-pa)"
 # Transcript link types we will actually fetch and inline (plain-ish text).
@@ -142,62 +145,104 @@ def _youtube_lookup(
 def resolve_podcast(source: str) -> dict[str, Any]:
     """Resolve a podcast reference to {kind, canonical_ref, feed_url, label}.
 
-    Accepts a show name (Podcast Index search) or an RSS feed URL
-    (validated/looked up by feed URL). Needs PODCAST_INDEX_API_KEY/_SECRET.
-    A Spotify-exclusive show with no public RSS cannot be resolved.
+    Key-free. Accepts, in order: a direct RSS feed URL (used as-is), an Apple
+    Podcasts URL (resolved by its id), or a show name (Apple iTunes Search). A
+    Spotify-exclusive show with no public RSS cannot be resolved.
     """
     source = (source or "").strip()
     if not source:
         raise ValueError("A podcast name or RSS feed URL is required.")
 
-    key = os.getenv("PODCAST_INDEX_API_KEY")
-    secret = os.getenv("PODCAST_INDEX_API_SECRET")
-    if not key or not secret:
+    lower = source.lower()
+    if "spotify.com" in lower:
         raise RuntimeError(
-            "Resolving a podcast needs PODCAST_INDEX_API_KEY and "
-            "PODCAST_INDEX_API_SECRET on the deployment. Set them (free at "
-            "podcastindex.org) and restart, or subscribe with the show's RSS "
-            "feed URL directly."
+            "Spotify links can't be resolved to RSS — a Spotify-exclusive show "
+            "has no public feed. Give the show name, or its RSS / Apple Podcasts "
+            "URL instead."
         )
 
-    is_feed_url = source.startswith("http") and "spotify.com" not in source
-    with _client() as client:
-        client.headers.update(_podcast_index_auth(key, secret))
-        if is_feed_url:
-            resp = client.get(
-                f"{PODCAST_INDEX_API}/podcasts/byfeedurl", params={"url": source}
-            )
-            resp.raise_for_status()
-            feed = resp.json().get("feed") or {}
-            if not feed:
-                raise RuntimeError(f"No podcast found at feed URL '{source}'.")
-        else:
-            resp = client.get(
-                f"{PODCAST_INDEX_API}/search/byterm",
-                params={"q": source, "max": 1},
-            )
-            resp.raise_for_status()
-            feeds = resp.json().get("feeds") or []
-            if not feeds:
-                raise RuntimeError(
-                    f"No podcast found for '{source}'. If it is a Spotify "
-                    "exclusive it has no public RSS feed and cannot be followed."
-                )
-            feed = feeds[0]
+    # Apple Podcasts URL → look up its feed by id (no key).
+    if "apple.com" in lower:
+        match = _APPLE_ID_RE.search(source)
+        feed = _itunes_lookup(match.group(1)) if match else None
+        if feed:
+            return feed
+        raise RuntimeError(f"Could not resolve the Apple Podcasts URL '{source}'.")
 
+    # Any other URL → treat as the RSS feed directly (no key, no resolver).
+    if lower.startswith("http"):
+        return {
+            "kind": PODCAST_KIND,
+            "canonical_ref": source,
+            "feed_url": source,
+            "label": _feed_title(source) or source,
+        }
+
+    # A show name → Apple iTunes Search (no key).
+    feed = _itunes_search(source)
+    if feed:
+        return feed
+    raise RuntimeError(
+        f"No podcast found for '{source}'. Try the show's exact name, or paste "
+        "its RSS feed or Apple Podcasts URL. (A Spotify exclusive has no public "
+        "RSS feed and cannot be followed.)"
+    )
+
+
+def _itunes_result_to_feed(result: dict[str, Any]) -> dict[str, Any] | None:
+    feed_url = result.get("feedUrl")
+    if not feed_url:
+        return None
     return {
         "kind": PODCAST_KIND,
-        "canonical_ref": str(feed.get("id") or feed.get("url") or ""),
-        "feed_url": feed.get("url") or "",
-        "label": feed.get("title") or "",
+        "canonical_ref": str(result.get("collectionId") or feed_url),
+        "feed_url": str(feed_url),
+        "label": str(result.get("collectionName") or result.get("trackName") or ""),
     }
 
 
-def _podcast_index_auth(key: str, secret: str) -> dict[str, str]:
-    """Podcast Index auth headers: sha1(key + secret + unix_time)."""
-    now = str(int(time.time()))
-    digest = hashlib.sha1((key + secret + now).encode("utf-8")).hexdigest()
-    return {"X-Auth-Key": key, "X-Auth-Date": now, "Authorization": digest}
+def _itunes_search(term: str) -> dict[str, Any] | None:
+    try:
+        with _client() as client:
+            resp = client.get(
+                ITUNES_SEARCH,
+                params={
+                    "media": "podcast",
+                    "entity": "podcast",
+                    "term": term,
+                    "limit": 1,
+                },
+            )
+            resp.raise_for_status()
+            results = resp.json().get("results") or []
+    except (httpx.HTTPError, ValueError):
+        return None
+    return _itunes_result_to_feed(results[0]) if results else None
+
+
+def _itunes_lookup(itunes_id: str) -> dict[str, Any] | None:
+    try:
+        with _client() as client:
+            resp = client.get(
+                ITUNES_LOOKUP, params={"id": itunes_id, "entity": "podcast"}
+            )
+            resp.raise_for_status()
+            results = resp.json().get("results") or []
+    except (httpx.HTTPError, ValueError):
+        return None
+    return _itunes_result_to_feed(results[0]) if results else None
+
+
+def _feed_title(feed_url: str) -> str:
+    """Best-effort channel title for a direct RSS feed URL."""
+    try:
+        with _client() as client:
+            resp = client.get(feed_url)
+            resp.raise_for_status()
+            parsed = feedparser.parse(resp.content)
+    except httpx.HTTPError:
+        return ""
+    return str((parsed.feed or {}).get("title") or "")
 
 
 # --- Fetch + enrich (steady state, pure RSS) --------------------------------
