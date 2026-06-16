@@ -1,6 +1,6 @@
 """Postgres store for the digest agents.
 
-Topics, named digest bundles, and generated digest runs live in `pa_*` tables in
+Topics, named digests, and generated digest runs live in `pa_*` tables in
 the same database the Mash runtime uses (`MASH_DATABASE_URL`). That URL is
 **required** — there is no file fallback; the store raises if it is unset.
 
@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 import psycopg
-from psycopg.rows import dict_row
+from psycopg.rows import DictRow, dict_row
 
 from mash.core.database import resolve_database_url
 
@@ -37,8 +37,10 @@ def _database_url() -> str:
     return url
 
 
-async def _connect() -> "psycopg.AsyncConnection[Any]":
-    conn = await psycopg.AsyncConnection.connect(
+async def _connect() -> "psycopg.AsyncConnection[DictRow]":
+    # Parametrize the class so `row_factory=dict_row` type-checks: calling
+    # `connect` on the bare AsyncConnection binds Row to the default TupleRow.
+    conn = await psycopg.AsyncConnection[DictRow].connect(
         _database_url(), row_factory=dict_row
     )
     await conn.set_autocommit(True)
@@ -70,6 +72,32 @@ async def _ensure_schema(conn: "psycopg.AsyncConnection[Any]") -> None:
                 id TEXT PRIMARY KEY,
                 label TEXT NOT NULL,
                 topic_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+            """
+        )
+        # A digest can mix topics and followed creators/podcasts. ADD COLUMN IF
+        # NOT EXISTS upgrades an existing pa_digests table in place.
+        await cursor.execute(
+            """
+            ALTER TABLE pa_digests
+            ADD COLUMN IF NOT EXISTS rss_feed_ids JSONB NOT NULL DEFAULT '[]'::jsonb
+            """
+        )
+        # Followed YouTube channels / podcasts. Resolved once at subscribe time
+        # (canonical_ref + feed_url cached) so steady-state polling is pure RSS.
+        await cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pa_rss_feeds (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                label TEXT NOT NULL,
+                source_url TEXT NOT NULL DEFAULT '',
+                canonical_ref TEXT NOT NULL DEFAULT '',
+                feed_url TEXT NOT NULL,
+                recency_days INT NOT NULL,
+                max_items INT NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL,
                 updated_at TIMESTAMPTZ NOT NULL
             )
@@ -209,16 +237,17 @@ async def upsert_topics(topics: list[dict[str, Any]]) -> None:
         await conn.close()
 
 
-# --- Digest bundles ---------------------------------------------------------
+# --- Digests (saved collections of topics + feeds) --------------------------
 
 
 async def list_digests() -> list[dict[str, Any]]:
-    """Return every named digest bundle, ordered by id."""
+    """Return every named digest, ordered by id."""
     conn = await _connect()
     try:
         async with conn.cursor() as cursor:
             await cursor.execute(
-                "SELECT id, label, topic_ids FROM pa_digests ORDER BY id"
+                "SELECT id, label, topic_ids, rss_feed_ids "
+                "FROM pa_digests ORDER BY id"
             )
             return list(await cursor.fetchall())
     finally:
@@ -230,7 +259,8 @@ async def get_digest(digest_id: str) -> Optional[dict[str, Any]]:
     try:
         async with conn.cursor() as cursor:
             await cursor.execute(
-                "SELECT id, label, topic_ids FROM pa_digests WHERE id = %s",
+                "SELECT id, label, topic_ids, rss_feed_ids "
+                "FROM pa_digests WHERE id = %s",
                 (str(digest_id),),
             )
             return await cursor.fetchone()
@@ -239,7 +269,10 @@ async def get_digest(digest_id: str) -> Optional[dict[str, Any]]:
 
 
 async def upsert_digest(
-    digest_id: str, label: str, topic_ids: list[str]
+    digest_id: str,
+    label: str,
+    topic_ids: list[str],
+    rss_feed_ids: Optional[list[str]] = None,
 ) -> None:
     now = _now()
     conn = await _connect()
@@ -247,17 +280,20 @@ async def upsert_digest(
         async with conn.cursor() as cursor:
             await cursor.execute(
                 """
-                INSERT INTO pa_digests (id, label, topic_ids, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO pa_digests
+                    (id, label, topic_ids, rss_feed_ids, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     label = EXCLUDED.label,
                     topic_ids = EXCLUDED.topic_ids,
+                    rss_feed_ids = EXCLUDED.rss_feed_ids,
                     updated_at = EXCLUDED.updated_at
                 """,
                 (
                     str(digest_id),
                     str(label),
                     json.dumps([str(t) for t in topic_ids]),
+                    json.dumps([str(f) for f in (rss_feed_ids or [])]),
                     now,
                     now,
                 ),
@@ -267,25 +303,121 @@ async def upsert_digest(
 
 
 async def resolve_digest_topics(digest_id: str) -> list[dict[str, Any]]:
-    """Resolve a bundle id to its topic rows, preserving the bundle's order."""
-    bundle = await get_digest(digest_id)
-    if bundle is None:
+    """Resolve a digest id to its topic rows, preserving the digest's order."""
+    digest = await get_digest(digest_id)
+    if digest is None:
         return []
-    ordered_ids = [str(t) for t in (bundle.get("topic_ids") or [])]
+    ordered_ids = [str(t) for t in (digest.get("topic_ids") or [])]
     if not ordered_ids:
         return []
     by_id = {row["id"]: row for row in await list_topics()}
     return [by_id[tid] for tid in ordered_ids if tid in by_id]
 
 
+async def resolve_digest_rss_feeds(digest_id: str) -> list[dict[str, Any]]:
+    """Resolve a digest id to its followed feed rows, preserving digest order."""
+    digest = await get_digest(digest_id)
+    if digest is None:
+        return []
+    ordered_ids = [str(f) for f in (digest.get("rss_feed_ids") or [])]
+    if not ordered_ids:
+        return []
+    by_id = {row["id"]: row for row in await list_rss_feeds()}
+    return [by_id[fid] for fid in ordered_ids if fid in by_id]
+
+
 async def clear_all() -> None:
-    """Remove all topics and bundles (used by reset). Digest runs are kept as
-    history."""
+    """Remove all topics, followed feeds, and digests (used by reset). Digest
+    runs are kept as history."""
     conn = await _connect()
     try:
         async with conn.cursor() as cursor:
             await cursor.execute("DELETE FROM pa_digests")
             await cursor.execute("DELETE FROM pa_topics")
+            await cursor.execute("DELETE FROM pa_rss_feeds")
+    finally:
+        await conn.close()
+
+
+# --- RSS feeds (followed creators / podcasts) -------------------------------
+
+
+async def list_rss_feeds() -> list[dict[str, Any]]:
+    """Return every followed feed, ordered by label."""
+    conn = await _connect()
+    try:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT id, kind, label, source_url, canonical_ref, feed_url, "
+                "recency_days, max_items FROM pa_rss_feeds ORDER BY label"
+            )
+            return list(await cursor.fetchall())
+    finally:
+        await conn.close()
+
+
+async def get_rss_feed(feed_id: str) -> Optional[dict[str, Any]]:
+    conn = await _connect()
+    try:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT id, kind, label, source_url, canonical_ref, feed_url, "
+                "recency_days, max_items FROM pa_rss_feeds WHERE id = %s",
+                (str(feed_id),),
+            )
+            return await cursor.fetchone()
+    finally:
+        await conn.close()
+
+
+async def upsert_rss_feed(feed: dict[str, Any]) -> None:
+    """Insert or update a followed feed by id."""
+    now = _now()
+    conn = await _connect()
+    try:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                """
+                INSERT INTO pa_rss_feeds
+                    (id, kind, label, source_url, canonical_ref, feed_url,
+                     recency_days, max_items, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    kind = EXCLUDED.kind,
+                    label = EXCLUDED.label,
+                    source_url = EXCLUDED.source_url,
+                    canonical_ref = EXCLUDED.canonical_ref,
+                    feed_url = EXCLUDED.feed_url,
+                    recency_days = EXCLUDED.recency_days,
+                    max_items = EXCLUDED.max_items,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (
+                    str(feed["id"]),
+                    str(feed["kind"]),
+                    str(feed["label"]),
+                    str(feed.get("source_url") or ""),
+                    str(feed.get("canonical_ref") or ""),
+                    str(feed["feed_url"]),
+                    int(feed["recency_days"]),
+                    int(feed["max_items"]),
+                    now,
+                    now,
+                ),
+            )
+    finally:
+        await conn.close()
+
+
+async def delete_rss_feed(feed_id: str) -> bool:
+    """Delete a followed feed by id. Returns whether a row was removed."""
+    conn = await _connect()
+    try:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                "DELETE FROM pa_rss_feeds WHERE id = %s", (str(feed_id),)
+            )
+            return cursor.rowcount > 0
     finally:
         await conn.close()
 

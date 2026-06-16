@@ -35,8 +35,8 @@ will report `database "mash-pa" does not exist`).
 
 `GITHUB_MCP_PAT` is optional: a GitHub personal access token (generate one
 at **Settings → Developer settings → Personal access tokens**, `repo` scope)
-that powers the `gh-brief` agent (read-only). Without it the agent still
-registers; it reports itself unconfigured.
+that powers the `github-digest` workflow (read-only). Without it the workflow
+still runs; it reports itself unconfigured.
 
 Do not quote values in `.env` — `python-dotenv` treats quotes as literal
 characters.
@@ -87,7 +87,8 @@ and one entry to the `CATALOG` tuple.
    ```
 
    The spec is a standard Mash `AgentSpec` (tools, LLM, system prompt,
-   config). `finance_watch` is the smallest complete example; `gh_brief`
+   config). `finance_watch` is the smallest complete example; the
+   `github-digest` workflow agent (`pa/catalog/digest/agents/github_digest/`)
    shows the MCP pattern.
 
 2. **Write the listing carefully.** The `AgentMetadata` is both the store
@@ -101,8 +102,8 @@ and one entry to the `CATALOG` tuple.
 4. **Degrade gracefully.** If the agent needs credentials, register it
    unconditionally and gate the capability: return `[]` from
    `build_mcp_servers()` when unconfigured and let the system prompt explain
-   what to set (see `gh_brief`). The catalog should always be fully
-   browsable.
+   what to set (see the `github-digest` workflow agent). The catalog should
+   always be fully browsable.
 
 5. **Ship data files as package data.** Add globs to
    `[tool.setuptools.package-data]` in `pyproject.toml` (see the

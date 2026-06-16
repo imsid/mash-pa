@@ -19,8 +19,8 @@ from typing import Any, Iterable
 DEFAULT_HOSTS: dict[str, dict[str, Any]] = {
     "assistant": {
         "primary": "digest-curator",
-        "subagents": ["digest-concierge", "finance-watch", "gh-brief"],
-        "workflows": ["interview-user", "run-digest"],
+        "subagents": ["digest-concierge", "finance-watch"],
+        "workflows": ["interview-user", "run-digest", "github-digest"],
     },
 }
 

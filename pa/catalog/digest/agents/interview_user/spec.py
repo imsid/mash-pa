@@ -2,7 +2,7 @@
 
 A workflow-only agent: the `interview-user` workflow runs it to interview the user
 about their interests (via durable `AskUser` interactions) and persist them as
-topics plus a `default` bundle. It honors a `reset` flag for re-onboarding. The
+topics plus a `default` digest. It honors a `reset` flag for re-onboarding. The
 interview script and normalization rules are the shared `onboard-topics` skill.
 """
 
@@ -21,10 +21,12 @@ from mash.workflows import TaskSpec, WorkflowSpec, WorkflowTaskMessageSpec
 
 from ...._base import ANTHROPIC_API_KEY, ANTHROPIC_MODEL, APP_NAME
 from ..._skills import ONBOARD_TOPICS_SKILL, skill
-from ..._tools import (
+from ...tools import (
     ClearInterestsTool,
     ReadDigestsTool,
+    ReadRssFeedsTool,
     ReadTopicsTool,
+    SubscribeRssFeedTool,
     WriteDigestTool,
     WriteTopicsTool,
 )
@@ -37,10 +39,11 @@ _PROMPT = f"""You are the onboarding interviewer in {APP_NAME}. Your job is to
 learn what the user wants digests about and save it.
 
 Run the `{ONBOARD_TOPICS_SKILL}` skill: ask a few targeted questions with
-`AskUser`, normalize the answers into topics, call `write_topics`, then create the
-`default` bundle with `write_digest`. If the request carries `reset: true`, call
-`clear_interests` first. Keep it short — interests evolve. Finish by confirming
-what you saved.
+`AskUser`, normalize the answers into topics (`write_topics`) and any followed
+YouTube creators or podcasts (`subscribe_rss_feed`), then create the `default`
+digest with `write_digest`, including both its topic ids and rss feed ids. If the
+request carries `reset: true`, call `clear_interests` first. Keep it short —
+interests evolve. Finish by confirming what you saved.
 """
 
 
@@ -55,8 +58,10 @@ class InterviewUserSpec(AgentSpec):
         tools.register(AskUserTool())
         tools.register(ReadTopicsTool())
         tools.register(ReadDigestsTool())
+        tools.register(ReadRssFeedsTool())
         tools.register(WriteTopicsTool())
         tools.register(WriteDigestTool())
+        tools.register(SubscribeRssFeedTool())
         tools.register(ClearInterestsTool())
         return tools
 
@@ -65,7 +70,7 @@ class InterviewUserSpec(AgentSpec):
         skills.register(
             skill(
                 ONBOARD_TOPICS_SKILL,
-                "Interview the user and save interests as topics and a bundle.",
+                "Interview the user and save interests as topics and a digest.",
             )
         )
         return skills

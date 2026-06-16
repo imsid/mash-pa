@@ -9,22 +9,30 @@ Turn the user's topics into one Axios-style ("Smart Brevity") digest. This skill
 backs both the `run-digest` workflow (over saved topics) and freeform digest
 requests (an ad-hoc topic the user describes).
 
-## Resolve the topics
+## Resolve the sources
+
+A digest has two kinds of source: **topics** (curated by web search) and
+**followed feeds** (`rss_feed_ids` — YouTube creators and podcasts, fetched by
+RSS). Process both.
 
 - **Workflow / saved digest:** read `digest_id` from `workflow_input` (default
-  `default`). Call `read_digests` with that `digest_id` to get its ordered topics.
-  If it resolves to no topics, stop and reply: "No topics yet — run
-  `/workflow run interview-user` to set up your interests." Do not call `AskUser`.
+  `default`). Call `read_digests` with that `digest_id`; it returns `topics`
+  (topic rows) and `rss_feeds` (followed creators/podcasts). If both are empty,
+  stop and reply: "Nothing set up yet — run `/workflow run interview-user` to set
+  up your interests." Do not call `AskUser`.
 - **Freeform:** build a single ad-hoc topic from the user's request (pick a label,
   intent, sensible `recency_days` and `max_items`, and any sources they named).
-  Omit `digest_id` when recording it.
+  Omit `digest_id` when recording it. **Exception:** if the request names a
+  specific YouTube creator or podcast (e.g. "latest episodes of the Training Data
+  podcast"), treat it as an ad-hoc feed, not a web topic — see "Ad-hoc feeds"
+  below — and do not web-search it.
 
 ## Open the run
 
-Call `start_digest_run` once with a `title` (the bundle label, or the freeform
+Call `start_digest_run` once with a `title` (the digest's label, or the freeform
 topic label) and, if you can frame it up front, a `lead` — the "1 big thing", the
 single most important item across all topics, in 2–3 sentences. Include `digest_id`
-for a saved bundle; omit it for a freeform digest. Keep the returned `run_id`.
+for a saved digest; omit it for a freeform digest. Keep the returned `run_id`.
 
 Then process each topic **one at a time**, finishing each as its own section
 before moving on, so no single response has to emit the whole digest.
@@ -74,5 +82,41 @@ Call `append_digest_section` with:
 - `seen`: `{ "urls": [...], "titles": [...] }` for the items in this card (this
   powers skip-seen next time).
 
-Then move to the next topic and repeat steps 1–5. After the last topic, briefly
-confirm the digest is ready (the user has seen each card as you wrote it).
+Then move to the next topic and repeat steps 1–5.
+
+## Followed feeds (creators / podcasts)
+
+For each id in the digest's `rss_feed_ids`, **do not web-search** — the feed is
+the source of truth:
+
+1. Call `read_new_rss_items` with the `rss_feed_id`. It returns the net-new,
+   already-deduped items (respecting the feed's recency window and `max_items`),
+   each with best-effort `content` (a YouTube transcript or podcast show-notes),
+   plus the `section_topic_id` to record under.
+2. Write one Axios card for the feed, heading = the feed `label`. For each item:
+   a **bold headline** (the video/episode title), *Why it matters:* one sentence
+   grounded in its `content`, 1–3 tight bullets, and **Go deeper:** the item
+   `url`. If `items` is empty, make the card one line saying the feed was quiet.
+3. Record it with `append_digest_section`: `run_id`, `topic_id` = the returned
+   `section_topic_id` (e.g. `rss:lex-fridman`), `heading` = the feed label,
+   `content` = the card markdown, and `seen` = `{ "urls": [...], "titles": [...] }`
+   for the items shown (this powers skip-seen next run).
+
+## Ad-hoc feeds (an unsaved creator / podcast named in a freeform request)
+
+When the user names a YouTube creator or podcast that is **not** saved, do **not**
+web-search it — resolve and fetch it directly:
+
+1. Call `fetch_rss_items` with the `kind` (`youtube_channel` or `podcast`), the
+   `source` (the name/handle/URL the user gave), and an optional `max_items`. It
+   resolves the feed (Podcast Index / YouTube Data API) and returns the latest
+   items with best-effort `content`. Only if it errors (e.g. resolution keys not
+   configured) fall back to an open `web_search`.
+2. Write one Axios card exactly as for a followed feed (heading = the returned
+   `label`).
+3. Record it with `append_digest_section` using `topic_id` `""` (it is not saved,
+   so it does not participate in skip-seen) and the `seen` items shown. You may
+   offer to save it as a followed feed afterward, but do not require it.
+
+After the last topic and feed, briefly confirm the digest is ready (the user has
+seen each card as you wrote it).

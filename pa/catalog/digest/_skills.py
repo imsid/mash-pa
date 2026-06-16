@@ -15,6 +15,7 @@ _SKILLS_ROOT = Path(__file__).resolve().parent / "skills"
 
 ONBOARD_TOPICS_SKILL = "onboard-topics"
 CURATE_DIGEST_SKILL = "curate-digest"
+GITHUB_DIGEST_SKILL = "github-digest"
 
 
 def skill(name: str, description: str) -> Skill:

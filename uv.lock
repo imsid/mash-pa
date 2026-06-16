@@ -422,6 +422,18 @@ wheels = [
 ]
 
 [[package]]
+name = "feedparser"
+version = "6.0.12"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "sgmllib3k" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/dc/79/db7edb5e77d6dfbc54d7d9df72828be4318275b2e580549ff45a962f6461/feedparser-6.0.12.tar.gz", hash = "sha256:64f76ce90ae3e8ef5d1ede0f8d3b50ce26bcce71dd8ae5e82b1cd2d4a5f94228", size = 286579 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4e/eb/c96d64137e29ae17d83ad2552470bafe3a7a915e85434d9942077d7fd011/feedparser-6.0.12-py3-none-any.whl", hash = "sha256:6bbff10f5a52662c00a2e3f86a38928c37c48f77b3c511aedcd51de933549324", size = 81480 },
+]
+
+[[package]]
 name = "google-auth"
 version = "2.54.0"
 source = { registry = "https://pypi.org/simple" }
@@ -753,6 +765,7 @@ name = "mash-pa"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "feedparser" },
     { name = "mashpy" },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-dotenv" },
@@ -765,7 +778,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "mashpy", specifier = ">=0.6.0" },
+    { name = "feedparser", specifier = ">=6.0" },
+    { name = "mashpy", specifier = ">=0.6.1" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1" },
     { name = "pyinstaller", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
@@ -774,7 +788,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "mashpy"
-version = "0.6.0"
+version = "0.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiosqlite" },
@@ -795,9 +809,9 @@ dependencies = [
     { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/80/cd/b2651d36bdafa74ab1db07db99776080761d9039826abf16679a154c7182/mashpy-0.6.0.tar.gz", hash = "sha256:3a81ab58da3d9e5479094ec9a6a6dddcb74556ca570c03150d0a9b4939f38d2e", size = 226985 }
+sdist = { url = "https://files.pythonhosted.org/packages/9d/8e/a801c49c08dfa82c919a900dbc1a8bdff608d3c5e992e71b9732e5a0a7c7/mashpy-0.6.1.tar.gz", hash = "sha256:de4b23b2ff1ff9059048a4711c50071074261bd12bf37897dd2b9a05f93f63bc", size = 228215 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6f/f7/d2216b3b546e652aa273ad5dede4d2457aa46eef40e1429bdcf7810eddb6/mashpy-0.6.0-py3-none-any.whl", hash = "sha256:12b70ca36877fd95ea7085935a84d835519356a9014c045c06631eb5396b0b98", size = 275177 },
+    { url = "https://files.pythonhosted.org/packages/84/55/074941770fb4abf519679adc12ecf63bf910da9bc2c387aca1d76cc3c903/mashpy-0.6.1-py3-none-any.whl", hash = "sha256:95945aa0a4fdcae3fd2a735a32d60ecd908bfc618a82532240e5c50046e9fad7", size = 276443 },
 ]
 
 [[package]]
@@ -1652,6 +1666,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/4f/db/cfac1baf10650ab4d
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9d/76/f789f7a86709c6b087c5a2f52f911838cad707cc613162401badc665acfe/setuptools-82.0.1-py3-none-any.whl", hash = "sha256:a59e362652f08dcd477c78bb6e7bd9d80a7995bc73ce773050228a348ce2e5bb", size = 1006223 },
 ]
+
+[[package]]
+name = "sgmllib3k"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9e/bd/3704a8c3e0942d711c1299ebf7b9091930adae6675d7c8f476a7ce48653c/sgmllib3k-1.0.0.tar.gz", hash = "sha256:7868fb1c8bfa764c1ac563d3cf369c381d1325d36124933a726f29fcdaa812e9", size = 5750 }
 
 [[package]]
 name = "shellingham"
