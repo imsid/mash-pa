@@ -255,7 +255,7 @@ def _interests_command(shell: MashRemoteShell, ctx: Any, args: list[str]) -> Non
     subcommand = args[0].strip().lower() if args else "show"
     if subcommand in ("", "show", "view", "list"):
         shell.handle_repl_message(
-            ctx, "List my saved digest topics and bundles."
+            ctx, "List my saved digest topics and digests."
         )
         return
     if subcommand == "reset":

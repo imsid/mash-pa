@@ -1,6 +1,6 @@
 ---
 name: onboard-topics
-description: Interview the user about their interests and save them as digest topics and a default bundle.
+description: Interview the user about their interests and save them as digest topics and a default digest.
 ---
 
 # Onboard Topics
@@ -24,9 +24,11 @@ Ask **no more than 4–5** questions with `AskUser`, one at a time. Use the
 2. For subjects where it matters, which **sources** they trust (free-form, e.g.
    "openai.com, anthropic.com, deepmind.google", "npr.org"). It is fine to leave a
    subject open to the whole web — that becomes an empty source list.
-3. How fresh items must be (offer options like "last 1 day", "last 3 days",
+3. Any specific **YouTube creators or podcasts** they want to follow (free-form,
+   e.g. "Lex Fridman on YouTube", "the Acquired podcast"). Optional — fine to skip.
+4. How fresh items must be (offer options like "last 1 day", "last 3 days",
    "last 7 days").
-4. How many items per subject (offer options like "3", "5", "8").
+5. How many items per subject (offer options like "3", "5", "8").
 
 Do not over-ask. Infer sensible specifics from their answers rather than
 interrogating every field.
@@ -44,14 +46,26 @@ Turn the answers into one topic per subject and call `write_topics` with:
 - `recency_days`: integer from their freshness answer.
 - `max_items`: integer from their count answer.
 
-Then call `write_digest` to create the starter bundle:
+For each creator or podcast they named, call `subscribe_rss_feed` with:
+
+- `kind`: `youtube_channel` or `podcast`.
+- `source`: what they gave — a @handle/channel URL/name for YouTube, a show name
+  or RSS URL for a podcast.
+- `recency_days` / `max_items`: reuse their freshness and count answers.
+
+It resolves and returns the feed (note its `id`). If a podcast cannot be resolved,
+mention it may be a Spotify exclusive with no public RSS and move on.
+
+Then call `write_digest` to create the starter digest:
 
 - `digest_id`: `default`
 - `label`: e.g. "Daily digest"
 - `topic_ids`: every topic id you just wrote, in the order they should appear.
+- `rss_feed_ids`: the ids of the creators/podcasts you followed (omit or `[]` if
+  none).
 
 ## Confirm
 
-Summarize back the topics and the `default` bundle in a short list, and tell the
+Summarize back the topics and the `default` digest in a short list, and tell the
 user they can generate it any time with `/workflow run run-digest`, edit interests
 conversationally, or view them with `/interests`.

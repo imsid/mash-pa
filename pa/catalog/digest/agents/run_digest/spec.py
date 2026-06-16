@@ -1,9 +1,9 @@
 """Run Digest — the deterministic digest workflow agent.
 
-A workflow-only agent: the `run-digest` workflow runs it to generate a digest over
-a saved bundle (default `default`, or `digest_id` from the workflow input). It runs
-the same shared `curate-digest` pipeline the interactive curator uses. No
-interactive tools — if the bundle has no topics it reports that and stops.
+A workflow-only agent: the `run-digest` workflow runs it to generate a digest run
+from a saved digest (default `default`, or `digest_id` from the workflow input). It
+runs the same shared `curate-digest` pipeline the interactive curator uses. No
+interactive tools — if the digest has no topics it reports that and stops.
 """
 
 from __future__ import annotations
@@ -20,10 +20,12 @@ from mash.workflows import TaskSpec, WorkflowSpec, WorkflowTaskMessageSpec
 
 from ...._base import ANTHROPIC_API_KEY, ANTHROPIC_MODEL, APP_NAME
 from ..._skills import CURATE_DIGEST_SKILL, skill
-from ..._tools import (
+from ...tools import (
     AppendDigestSectionTool,
     ReadDigestHistoryTool,
     ReadDigestsTool,
+    ReadNewRssItemsTool,
+    ReadRssFeedsTool,
     ReadTopicsTool,
     StartDigestRunTool,
 )
@@ -36,18 +38,20 @@ _PROMPT = f"""You are the digest runner in {APP_NAME}. Generate one Axios-style
 digest over the user's saved topics.
 
 Run the `{CURATE_DIGEST_SKILL}` skill. Read `digest_id` from `workflow_input`
-(default `default`), resolve it to its topics with `read_digests`, and process each
-one: curate (trusted sources first, open-web fallback), extract with `web_fetch`,
-skip already-seen items via `read_digest_history`, and write the Axios digest one
-section at a time — `start_digest_run` once, then one `append_digest_section` per
-topic so no single response has to emit the whole digest. If the bundle resolves
-to no topics, reply that there are none yet and that the user should run
-`/workflow run interview-user`. Do not ask the user questions.
+(default `default`), resolve it with `read_digests` (returns `topics` and `rss_feeds`),
+and process each: for topics, curate (trusted
+sources first, open-web fallback), extract with `web_fetch`, skip already-seen via
+`read_digest_history`; for followed feeds, call `read_new_rss_items` instead of
+web-searching. Write the Axios digest one section at a time — `start_digest_run`
+once, then one `append_digest_section` per topic or feed so no single response has
+to emit the whole digest. If the digest resolves to nothing, reply that there is
+nothing yet and that the user should run `/workflow run interview-user`. Do not ask
+the user questions.
 """
 
 
 class RunDigestSpec(AgentSpec):
-    """Workflow agent that generates a digest over a saved bundle."""
+    """Workflow agent that generates a digest run from a saved digest."""
 
     def get_agent_id(self) -> str:
         return RUN_DIGEST_AGENT_ID
@@ -56,7 +60,9 @@ class RunDigestSpec(AgentSpec):
         tools = ToolRegistry()
         tools.register(ReadTopicsTool())
         tools.register(ReadDigestsTool())
+        tools.register(ReadRssFeedsTool())
         tools.register(ReadDigestHistoryTool())
+        tools.register(ReadNewRssItemsTool())
         tools.register(StartDigestRunTool())
         tools.register(AppendDigestSectionTool())
         return tools

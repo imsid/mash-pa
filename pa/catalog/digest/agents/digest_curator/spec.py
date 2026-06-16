@@ -20,10 +20,13 @@ from mash.tools.registry import ToolRegistry
 
 from ...._base import ANTHROPIC_API_KEY, ANTHROPIC_MODEL, APP_NAME
 from ..._skills import CURATE_DIGEST_SKILL, skill
-from ..._tools import (
+from ...tools import (
     AppendDigestSectionTool,
+    FetchRssItemsTool,
     ReadDigestHistoryTool,
     ReadDigestsTool,
+    ReadNewRssItemsTool,
+    ReadRssFeedsTool,
     ReadTopicsTool,
     StartDigestRunTool,
 )
@@ -42,6 +45,14 @@ Working rules:
   fallback items. Extract real content with `web_fetch`, never headline from
   snippets alone. Skip already-seen items via `read_digest_history`. Cite every
   claim with a link; never invent sources or facts.
+- For followed creators/podcasts (`read_rss_feeds`), do NOT web-search them:
+  call `read_new_rss_items` for each — it returns net-new, already-deduped items
+  with their content — and write one card per feed, recording it with the
+  `section_topic_id` it returns so skip-seen persists.
+- When the user names a YouTube creator or podcast that is NOT saved (e.g.
+  "latest episodes of the Training Data podcast"), do NOT web-search it either:
+  call `fetch_rss_items` with the `kind` and the name/handle/URL to resolve and
+  fetch its latest episodes directly. Only fall back to web search if that errors.
 - Build the digest one section at a time: `start_digest_run` once, then write and
   record each card with `append_digest_section` (one card per turn) so no single
   response has to emit the whole digest. This also lets the user view/search it
@@ -52,8 +63,12 @@ Working rules:
 
 If the user has no saved topics (use `read_topics` / `read_digests` to check),
 tell them to run `/workflow run interview-user` to set up interests. When they
-want to add, edit, or remove topics or bundles, delegate to the
+want to add, edit, or remove topics or digests, delegate to the
 `{DIGEST_CONCIERGE_AGENT_ID}` subagent if it is available, then confirm back.
+
+When the user wants a snapshot of their GitHub world — PRs awaiting their review,
+their open PRs, assigned issues, recent repo activity — tell them to run
+`/workflow run github-digest`; that snapshot ships as its own digest workflow.
 """
 
 
@@ -67,7 +82,10 @@ class DigestCuratorSpec(AgentSpec):
         tools = ToolRegistry()
         tools.register(ReadTopicsTool())
         tools.register(ReadDigestsTool())
+        tools.register(ReadRssFeedsTool())
         tools.register(ReadDigestHistoryTool())
+        tools.register(ReadNewRssItemsTool())
+        tools.register(FetchRssItemsTool())
         tools.register(StartDigestRunTool())
         tools.register(AppendDigestSectionTool())
         return tools
