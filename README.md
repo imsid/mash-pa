@@ -13,6 +13,7 @@ Run the store on your laptop or your own server.
 # 1. Start your store — one container, embedded Postgres included
 docker run -d --name pa -p 8000:8000 \
   -e ANTHROPIC_API_KEY=sk-ant-... \
+  -e YOUTUBE_API_KEY=AIza... \
   -e GITHUB_MCP_PAT=ghp_... \
   -v pa-data:/var/lib/pa \
   ghcr.io/imsid/mash-pa:latest
