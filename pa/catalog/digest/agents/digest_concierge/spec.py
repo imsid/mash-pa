@@ -12,12 +12,12 @@ from typing import Any
 
 from mash.core.config import AgentConfig
 from mash.core.llm import LLMProvider
-from mash.core.llm.anthropic import AnthropicProvider
 from mash.runtime import AgentMetadata, AgentSpec
 from mash.skills.registry import SkillRegistry
 from mash.tools.registry import ToolRegistry
 
-from ...._base import ANTHROPIC_API_KEY, ANTHROPIC_MODEL, APP_NAME
+from ...._base import APP_NAME
+from ...._llm import build_gemma_llm
 from ..._skills import ONBOARD_TOPICS_SKILL, skill
 from ...tools import (
     ClearInterestsTool,
@@ -90,11 +90,10 @@ class DigestConciergeSpec(AgentSpec):
         return skills
 
     def build_llm(self) -> LLMProvider:
-        return AnthropicProvider(
-            app_id=DIGEST_CONCIERGE_AGENT_ID,
-            model=ANTHROPIC_MODEL,
-            api_key=ANTHROPIC_API_KEY,
-        )
+        # Bounded, low-volume interest management — runs on Gemma over OpenRouter
+        # to keep frontier spend for the web-research agents. Routing is pinned to
+        # tool-call-capable backends so the read/write tools round-trip reliably.
+        return build_gemma_llm(DIGEST_CONCIERGE_AGENT_ID)
 
     def build_system_prompt(self) -> list[dict[str, Any]]:
         return [

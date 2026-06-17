@@ -12,14 +12,14 @@ from typing import Any
 
 from mash.core.config import AgentConfig
 from mash.core.llm import LLMProvider
-from mash.core.llm.anthropic import AnthropicProvider
 from mash.runtime import AgentMetadata, AgentSpec
 from mash.skills.registry import SkillRegistry
 from mash.tools.ask_user import AskUserTool
 from mash.tools.registry import ToolRegistry
 from mash.workflows import TaskSpec, WorkflowSpec, WorkflowTaskMessageSpec
 
-from ...._base import ANTHROPIC_API_KEY, ANTHROPIC_MODEL, APP_NAME
+from ...._base import APP_NAME
+from ...._llm import build_gemma_llm
 from ..._skills import ONBOARD_TOPICS_SKILL, skill
 from ...tools import (
     ClearInterestsTool,
@@ -76,11 +76,11 @@ class InterviewUserSpec(AgentSpec):
         return skills
 
     def build_llm(self) -> LLMProvider:
-        return AnthropicProvider(
-            app_id=INTERVIEW_USER_AGENT_ID,
-            model=ANTHROPIC_MODEL,
-            api_key=ANTHROPIC_API_KEY,
-        )
+        # Bounded onboarding interview — runs on Gemma over OpenRouter to keep
+        # frontier spend for the web-research agents. Routing is pinned to
+        # tool-call-capable backends so the AskUser/write tools round-trip
+        # reliably (a leaked tool call silently ends the interview early).
+        return build_gemma_llm(INTERVIEW_USER_AGENT_ID)
 
     def build_system_prompt(self) -> list[dict[str, Any]]:
         return [

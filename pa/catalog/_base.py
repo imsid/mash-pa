@@ -13,3 +13,15 @@ APP_NAME = "PA"
 
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+
+# Open-source model config (Gemma over OpenRouter's Chat Completions wire).
+# The lighter management agents — digest-concierge, interview-user — run on
+# Gemma to save frontier spend; the web-research agents stay on Anthropic for
+# output quality. Defaults to the paid Gemma 4 endpoint (~$0.12/M in, $0.35/M
+# out — cents per run): unlike the `:free` pool, it has backends that reliably
+# advertise tool-call support, which the management agents depend on. The free
+# tier intermittently routed to backends without a tool-call parser, leaking raw
+# tool tokens and dropping the call mid-workflow.
+OSS_BASE_URL = os.getenv("OSS_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+GEMMA_MODEL = os.getenv("GEMMA_MODEL", "google/gemma-4-31b-it")
