@@ -16,9 +16,15 @@ from mash.core.llm.anthropic import AnthropicProvider
 from mash.runtime import AgentMetadata, AgentSpec
 from mash.skills.registry import SkillRegistry
 from mash.tools.registry import ToolRegistry
+from mash.tools.web_search import ParallelSearchProvider, WebSearchProvider
 from mash.workflows import TaskSpec, WorkflowSpec, WorkflowTaskMessageSpec
 
-from ...._base import ANTHROPIC_API_KEY, ANTHROPIC_MODEL, APP_NAME
+from ...._base import (
+    ANTHROPIC_API_KEY,
+    ANTHROPIC_MODEL,
+    APP_NAME,
+    PARALLELAI_API_KEY,
+)
 from ..._skills import CURATE_DIGEST_SKILL, skill
 from ...tools import (
     AppendDigestSectionTool,
@@ -77,8 +83,10 @@ class RunDigestSpec(AgentSpec):
         )
         return skills
 
-    def enable_web_search_tools(self) -> bool:
-        return True
+    def build_web_search(self) -> WebSearchProvider | None:
+        if not PARALLELAI_API_KEY:
+            return None
+        return ParallelSearchProvider(api_key=PARALLELAI_API_KEY)
 
     def build_llm(self) -> LLMProvider:
         return AnthropicProvider(

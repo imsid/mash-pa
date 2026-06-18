@@ -62,14 +62,20 @@ Write this topic's card in markdown, then immediately record it — do not wait
 until all topics are done:
 
 - Use the topic label as the heading. For each item:
-  - a **bold one-line headline**,
+  - a **bold one-line headline** that is itself a markdown link to the source,
+    `**[Headline text](https://source-url)**`,
   - *Why it matters:* one sentence,
   - 1–3 tight bullets ("The big picture", "Between the lines", numbers),
-  - **Go deeper:** the source link.
+  - **Go deeper:** `[publisher/title](https://source-url)` — a real, clickable
+    markdown link to the exact page you fetched, never a bare label or "(link)".
 - Tag any open-web fallback items as `(unverified source)`.
 - If the topic had nothing net-new, make the card one line saying it was quiet.
 
-Cite every claim with its link. Never invent sources or facts.
+Every item must carry its source URL as a markdown link — both in the headline
+and the **Go deeper:** line. Cite every claim with its link, and never emit an
+item, table row, or bullet without the underlying URL. Never invent sources,
+links, or facts: only ever link to URLs you actually retrieved with `web_fetch`
+(or that `read_new_rss_items` / `fetch_rss_items` returned).
 
 ## 5. Record the section
 
@@ -94,9 +100,11 @@ the source of truth:
    each with best-effort `content` (a YouTube transcript or podcast show-notes),
    plus the `section_topic_id` to record under.
 2. Write one Axios card for the feed, heading = the feed `label`. For each item:
-   a **bold headline** (the video/episode title), *Why it matters:* one sentence
-   grounded in its `content`, 1–3 tight bullets, and **Go deeper:** the item
-   `url`. If `items` is empty, make the card one line saying the feed was quiet.
+   a **bold headline** that is a markdown link to the item `url`
+   (`**[Episode title](url)**`), *Why it matters:* one sentence grounded in its
+   `content`, 1–3 tight bullets, and **Go deeper:** `[label](url)` as a clickable
+   markdown link to the item `url`. If `items` is empty, make the card one line
+   saying the feed was quiet.
 3. Record it with `append_digest_section`: `run_id`, `topic_id` = the returned
    `section_topic_id` (e.g. `rss:lex-fridman`), `heading` = the feed label,
    `content` = the card markdown, and `seen` = `{ "urls": [...], "titles": [...] }`

@@ -72,6 +72,7 @@ class ReadLedgerTool:
 
     name = "read_ledger"
     requires_approval = False
+    parallel_safe = True
     description = (
         "Read transactions from the local ledger CSV "
         "(columns: date, merchant, category, amount). Optionally bound by "
