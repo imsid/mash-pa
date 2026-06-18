@@ -23,6 +23,7 @@ class _BaseTool:
     """Shared tool surface: name, description, schema, and LLM formatting."""
 
     requires_approval = False
+    parallel_safe = True
     name: str = ""
     description: str = ""
     parameters: Dict[str, Any] = {"type": "object", "properties": {}}

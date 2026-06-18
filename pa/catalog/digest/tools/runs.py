@@ -50,6 +50,7 @@ class StartDigestRunTool(_BaseTool):
     """Open a digest run before appending its sections."""
 
     name = "start_digest_run"
+    parallel_safe = False
     description = (
         "Open a new digest run and get back its `run_id`. Call this once before "
         "writing sections. Pass a `title` and an optional `lead` (the '1 big "
@@ -90,6 +91,7 @@ class AppendDigestSectionTool(_BaseTool):
     """Append one digest section (card) to an open run."""
 
     name = "append_digest_section"
+    parallel_safe = False
     description = (
         "Append one section (card) to a digest run, written one at a time so no "
         "single response has to emit the whole digest. Pass the `run_id` from "

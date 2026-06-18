@@ -25,3 +25,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 OSS_BASE_URL = os.getenv("OSS_BASE_URL", "https://openrouter.ai/api/v1")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GEMMA_MODEL = os.getenv("GEMMA_MODEL", "google/gemma-4-31b-it")
+
+# Web search provider credential. The web-research digest agents back their
+# `web_search`/`web_fetch` tools with Parallel AI; unset leaves web search off.
+PARALLELAI_API_KEY = os.getenv("PARALLELAI_API_KEY")
