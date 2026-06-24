@@ -64,26 +64,6 @@ async def _ensure_schema(conn: "psycopg.AsyncConnection[Any]") -> None:
             )
             """
         )
-        # One-time clean migration to the BIGINT-id digest model. The original
-        # schema gave `pa_digests.id` a user-chosen TEXT slug and left runs
-        # unlinked (`digest_id` empty). The current model makes the id
-        # DB-generated and links every run/section to a real digest row, so the
-        # shapes are incompatible. There is no backward compat: if the old shape
-        # is present, drop the three digest tables and recreate. `pa_topics` and
-        # `pa_rss_feeds` are untouched (configured digests are re-made via
-        # `/workflow run interview-user`).
-        await cursor.execute(
-            """
-            SELECT data_type FROM information_schema.columns
-            WHERE table_name = 'pa_digests' AND column_name = 'id'
-            """
-        )
-        id_type_row = await cursor.fetchone()
-        if id_type_row is not None and id_type_row["data_type"] == "text":
-            await cursor.execute(
-                "DROP TABLE IF EXISTS pa_digest_sections, pa_digest_runs, "
-                "pa_digests CASCADE"
-            )
         # A digest is a named collection (configured topics/feeds) or a freeform
         # snapshot; either way it is a real row, and `source` records what created
         # it (a workflow/agent id, e.g. `interview-user`, `github-digest`,
