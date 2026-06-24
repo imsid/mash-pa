@@ -16,16 +16,16 @@ from __future__ import annotations
 from typing import Any
 
 from mash.core.config import AgentConfig
-from mash.core.llm import LLMProvider
-from mash.core.llm.anthropic import AnthropicProvider
+from mash.core.llm import LLMProvider, OpenAIProvider
 from mash.mcp.types import MCPServerConfig
 from mash.runtime import AgentMetadata, AgentSpec
 from mash.skills.registry import SkillRegistry
 from mash.tools.registry import ToolRegistry
 from mash.workflows import TaskSpec, WorkflowSpec, WorkflowTaskMessageSpec
 
-from ...._base import ANTHROPIC_API_KEY, ANTHROPIC_MODEL, APP_NAME
+from ...._base import APP_NAME, OPENAI_API_KEY, OPENAI_MODEL
 from ..._github import github_mcp_config
+from ..._output import DIGEST_OUTPUT_SCHEMA
 from ..._skills import GITHUB_DIGEST_SKILL, skill
 from ...tools import AppendDigestSectionTool, StartDigestRunTool
 
@@ -41,10 +41,12 @@ where you can): pull requests awaiting their review
 (`search_pull_requests review-requested:@me state:open`), their own open PRs
 (`author:@me state:open`), assigned issues (`search_issues assignee:@me state:open`),
 and, only if the user named repositories in `workflow_input`, recent activity for
-those repos. Open one run titled "Your GitHub world" with `start_digest_run`, then
-write one section per group with `append_digest_section` (most actionable first),
-each with `topic_id` "" and `seen` {{}} — this is a snapshot, never skip already-seen
-items. Your GitHub access is read-only.
+those repos. Open one run titled "Your GitHub world" with `start_digest_run`
+(pass `workflow` "{GITHUB_DIGEST_AGENT_ID}" — this is a freeform snapshot, not a
+saved digest — and keep the returned `digest_id` and `run_id`), then write one
+section per group with `append_digest_section` (most actionable first), each with
+`topic_id` "" and `seen` {{}} — this is a snapshot, never skip already-seen items.
+Your GitHub access is read-only.
 
 If the GitHub tools are unavailable, this deployment has no GitHub connection: write
 a one-card run explaining that `GITHUB_MCP_PAT` (a GitHub personal access token) must
@@ -80,10 +82,8 @@ class GithubDigestSpec(AgentSpec):
         return [config] if config else []
 
     def build_llm(self) -> LLMProvider:
-        return AnthropicProvider(
-            app_id=GITHUB_DIGEST_AGENT_ID,
-            model=ANTHROPIC_MODEL,
-            api_key=ANTHROPIC_API_KEY,
+        return OpenAIProvider(
+            app_id=GITHUB_DIGEST_AGENT_ID, model=OPENAI_MODEL, api_key=OPENAI_API_KEY
         )
 
     def build_system_prompt(self) -> list[dict[str, Any]]:
@@ -112,7 +112,13 @@ def create_spec() -> GithubDigestSpec:
 def build_workflow_spec() -> WorkflowSpec:
     return WorkflowSpec(
         workflow_id=GITHUB_DIGEST_WORKFLOW_ID,
-        tasks=[TaskSpec(task_id=GITHUB_DIGEST_TASK_ID, agent_spec=create_spec())],
+        tasks=[
+            TaskSpec(
+                task_id=GITHUB_DIGEST_TASK_ID,
+                agent_spec=create_spec(),
+                structured_output=DIGEST_OUTPUT_SCHEMA,
+            )
+        ],
         task_message=WorkflowTaskMessageSpec(skill_name=GITHUB_DIGEST_SKILL),
     )
 

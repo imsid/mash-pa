@@ -1,6 +1,6 @@
 ---
 name: onboard-topics
-description: Interview the user about their interests and save them as digest topics and a default digest.
+description: Interview the user about their interests and save them as digest topics and a starter digest.
 ---
 
 # Onboard Topics
@@ -56,9 +56,9 @@ For each creator or podcast they named, call `subscribe_rss_feed` with:
 It resolves and returns the feed (note its `id`). If a podcast cannot be resolved,
 mention it may be a Spotify exclusive with no public RSS and move on.
 
-Then call `write_digest` to create the starter digest:
+Then call `write_digest` to create the starter digest (omit `digest_id` — it is
+generated and returned):
 
-- `digest_id`: `default`
 - `label`: e.g. "Daily digest"
 - `topic_ids`: every topic id you just wrote, in the order they should appear.
 - `rss_feed_ids`: the ids of the creators/podcasts you followed (omit or `[]` if
@@ -66,6 +66,6 @@ Then call `write_digest` to create the starter digest:
 
 ## Confirm
 
-Summarize back the topics and the `default` digest in a short list, and tell the
+Summarize back the topics and the starter digest in a short list, and tell the
 user they can generate it any time with `/workflow run run-digest`, edit interests
 conversationally, or view them with `/interests`.

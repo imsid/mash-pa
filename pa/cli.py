@@ -21,6 +21,11 @@ from mash.cli.shell import MashRemoteShell, ShellTarget
 
 from . import store
 
+# Workflows whose final task returns a digest structured output (see
+# `pa.catalog.digest._output.DIGEST_OUTPUT_SCHEMA`). For these, the CLI renders
+# the digest from that structured output once the run completes.
+_DIGEST_WORKFLOW_IDS = frozenset({"run-digest", "github-digest"})
+
 PA_DEFAULT_API_BASE_URL = os.environ.get(
     "PA_API_BASE_URL",
     "http://127.0.0.1:8002",
@@ -255,7 +260,9 @@ def _interests_command(shell: MashRemoteShell, ctx: Any, args: list[str]) -> Non
     subcommand = args[0].strip().lower() if args else "show"
     if subcommand in ("", "show", "view", "list"):
         shell.handle_repl_message(
-            ctx, "List my saved digest topics and digests."
+            ctx,
+            "List my saved digest topics, the YouTube creators and podcasts I "
+            "follow, and my digests.",
         )
         return
     if subcommand == "reset":
@@ -271,11 +278,35 @@ def _interests_command(shell: MashRemoteShell, ctx: Any, args: list[str]) -> Non
     ctx.renderer.error("Usage: /interests [show|reset]")
 
 
+def _render_digest_payload(
+    renderer: Any, payload: dict, *, show_command: bool = False
+) -> None:
+    """Dumb-render a digest payload — `{title, lead, sections:[{position,
+    heading, content}], digest_id, run_id}` — as markdown. Shared by `/digest`
+    and the workflow render (which sets `show_command` to print the re-view
+    command). The same shape comes from the store and from a workflow's
+    structured output."""
+    parts = [f"# {payload.get('title') or ''}"]
+    lead = str(payload.get("lead") or "").strip()
+    if lead:
+        parts.append(f"**1 big thing:** {lead}")
+    sections = sorted(
+        payload.get("sections") or [], key=lambda s: int(s.get("position") or 0)
+    )
+    parts.extend(str(s.get("content") or "").strip() for s in sections)
+    renderer.markdown("\n\n".join(parts))
+    if show_command:
+        digest_id = payload.get("digest_id")
+        run_id = payload.get("run_id")
+        if digest_id is not None and run_id is not None:
+            renderer.info(f"View this digest later: /digest {digest_id} {run_id}")
+
+
 def _digest_command(ctx: Any, args: list[str]) -> None:
     """View past digests directly from the Postgres store (no agent).
 
-    `/digest` latest · `/digest list [N]` · `/digest <run_id>` ·
-    `/digest search <query>`.
+    `/digest` latest · `/digest list [N]` · `/digest config` ·
+    `/digest <digest_id> <run_id>` · `/digest <run_id>` · `/digest search <query>`.
     """
     # Imported lazily so the CLI (and its PyInstaller binary) does not pull in
     # psycopg and the catalog unless a digest command is actually used.
@@ -298,13 +329,8 @@ def _digest_command(ctx: Any, args: list[str]) -> None:
         )
 
     def _render_run(run: dict) -> None:
-        sections = asyncio.run(digest_store.get_run_sections(int(run["id"])))
-        parts = [f"# {run['title']}"]
-        lead = str(run.get("lead") or "").strip()
-        if lead:
-            parts.append(f"**1 big thing:** {lead}")
-        parts.extend(str(s["content"]).strip() for s in sections)
-        renderer.markdown("\n\n".join(parts))
+        payload = asyncio.run(digest_store.digest_run_payload(run))
+        _render_digest_payload(renderer, payload)
 
     try:
         sub = args[0].strip().lower() if args else ""
@@ -315,6 +341,32 @@ def _digest_command(ctx: Any, args: list[str]) -> None:
                 renderer.info("No digests yet. Generate one with `/workflow run run-digest`.")
                 return
             _run_table(rows)
+            return
+        if sub == "config":
+            rows = asyncio.run(digest_store.list_digest_configs())
+            if not rows:
+                renderer.info(
+                    "No digests configured. Set up interests with "
+                    "`/workflow run interview-user`."
+                )
+                return
+            renderer.table(
+                ["ID", "Label", "Source", "Topics", "Feeds", "Runs", "Last run"],
+                [
+                    [
+                        str(r["id"]),
+                        str(r["label"]),
+                        str(r["source"]),
+                        ", ".join(r["topics"])
+                        if r["topics"]
+                        else ("(freeform)" if not r["feeds"] else "—"),
+                        ", ".join(r["feeds"]) if r["feeds"] else "—",
+                        str(r["runs"]),
+                        str(r["last_run"] or "—"),
+                    ]
+                    for r in rows
+                ],
+            )
             return
         if sub == "search":
             query = " ".join(args[1:]).strip()
@@ -327,15 +379,28 @@ def _digest_command(ctx: Any, args: list[str]) -> None:
                 return
             _run_table(rows)
             return
+        # `/digest <digest_id> <run_id>` — a run addressed within its digest.
+        if len(args) >= 2 and args[0].isdigit() and args[1].isdigit():
+            digest_id, run_id = int(args[0]), int(args[1])
+            run = asyncio.run(digest_store.get_run_for_digest(digest_id, run_id))
+            if run is None:
+                renderer.error(f"No run {run_id} in digest {digest_id}.")
+                return
+            _render_run(run)
+            return
+        # `/digest <run_id>` — a run by its id alone.
         if sub.isdigit():
             run = asyncio.run(digest_store.get_run(int(sub)))
             if run is None:
-                renderer.error(f"No digest with id {sub}.")
+                renderer.error(f"No digest run with id {sub}.")
                 return
             _render_run(run)
             return
         if sub:
-            renderer.error("Usage: /digest [list N | search <query> | <run_id>]")
+            renderer.error(
+                "Usage: /digest [list N | config | search <query> | "
+                "<digest_id> <run_id> | <run_id>]"
+            )
             return
         latest = asyncio.run(digest_store.latest_run())
         if latest is None:
@@ -358,10 +423,21 @@ def _register_pa_commands(shell: MashRemoteShell) -> None:
     shell.register_command(
         Command(
             name="digest",
-            help="View past digests (/digest [list N | search <query> | <run_id>])",
+            help=(
+                "View past digests (/digest [list N | config | search <query> | "
+                "<digest_id> <run_id> | <run_id>])"
+            ),
             handler=_digest_command,
         )
     )
+    # Render each digest workflow's structured output as a digest. mash's default
+    # `/workflow run` calls this renderer on the task's `request.completed`, so we
+    # no longer fork the command — we just register how to draw the payload.
+    def _render_digest_output(_task_id: str, _agent_id: str, data: dict) -> None:
+        _render_digest_payload(shell.renderer, data, show_command=True)
+
+    for workflow_id in _DIGEST_WORKFLOW_IDS:
+        shell.register_structured_output_renderer(workflow_id, _render_digest_output)
 
 
 def _run_repl(

@@ -12,17 +12,16 @@ from __future__ import annotations
 from typing import Any
 
 from mash.core.config import AgentConfig
-from mash.core.llm import LLMProvider
-from mash.core.llm.anthropic import AnthropicProvider
+from mash.core.llm import LLMProvider, OpenAIProvider
 from mash.runtime import AgentMetadata, AgentSpec
 from mash.skills.registry import SkillRegistry
 from mash.tools.registry import ToolRegistry
 from mash.tools.web_search import ParallelSearchProvider, WebSearchProvider
 
 from ...._base import (
-    ANTHROPIC_API_KEY,
-    ANTHROPIC_MODEL,
     APP_NAME,
+    OPENAI_API_KEY,
+    OPENAI_MODEL,
     PARALLELAI_API_KEY,
 )
 from ..._skills import CURATE_DIGEST_SKILL, skill
@@ -47,6 +46,11 @@ The curation pipeline is the `{CURATE_DIGEST_SKILL}` skill — load it and follo
 for every digest, whether the user asks for a freeform topic or their saved ones.
 
 Working rules:
+- When the user names one of their saved digests ("generate my Daily Brief
+  digest"), never guess its id: call `read_digests` with no `digest_id` to list
+  them, match the name to a digest `label`, then call `read_digests` with that id
+  to get its `topics` and `rss_feeds`, and run both. See the skill's "Resolve the
+  sources".
 - Curate trusted `sources` first and fall back to open web search, tagging
   fallback items. Extract real content with `web_fetch`, never headline from
   snippets alone. Skip already-seen items via `read_digest_history`. Cite every
@@ -112,10 +116,8 @@ class DigestCuratorSpec(AgentSpec):
         return ParallelSearchProvider(api_key=PARALLELAI_API_KEY)
 
     def build_llm(self) -> LLMProvider:
-        return AnthropicProvider(
-            app_id=DIGEST_CURATOR_AGENT_ID,
-            model=ANTHROPIC_MODEL,
-            api_key=ANTHROPIC_API_KEY,
+        return OpenAIProvider(
+            app_id=DIGEST_CURATOR_AGENT_ID, model=OPENAI_MODEL, api_key=OPENAI_API_KEY
         )
 
     def build_system_prompt(self) -> list[dict[str, Any]]:

@@ -12,7 +12,7 @@ from typing import Any
 
 from mash.core.config import AgentConfig
 from mash.core.llm import LLMProvider
-from mash.core.llm.anthropic import AnthropicProvider
+from mash.core.llm.openai import OpenAIProvider
 from mash.runtime import AgentMetadata, AgentSpec
 from mash.skills.registry import SkillRegistry
 from mash.tools.registry import ToolRegistry
@@ -20,11 +20,12 @@ from mash.tools.web_search import ParallelSearchProvider, WebSearchProvider
 from mash.workflows import TaskSpec, WorkflowSpec, WorkflowTaskMessageSpec
 
 from ...._base import (
-    ANTHROPIC_API_KEY,
-    ANTHROPIC_MODEL,
     APP_NAME,
+    OPENAI_API_KEY,
+    OPENAI_MODEL,
     PARALLELAI_API_KEY,
 )
+from ..._output import DIGEST_OUTPUT_SCHEMA
 from ..._skills import CURATE_DIGEST_SKILL, skill
 from ...tools import (
     AppendDigestSectionTool,
@@ -43,16 +44,17 @@ RUN_DIGEST_TASK_ID = "curate"
 _PROMPT = f"""You are the digest runner in {APP_NAME}. Generate one Axios-style
 digest over the user's saved topics.
 
-Run the `{CURATE_DIGEST_SKILL}` skill. Read `digest_id` from `workflow_input`
-(default `default`), resolve it with `read_digests` (returns `topics` and `rss_feeds`),
-and process each: for topics, curate (trusted
-sources first, open-web fallback), extract with `web_fetch`, skip already-seen via
-`read_digest_history`; for followed feeds, call `read_new_rss_items` instead of
-web-searching. Write the Axios digest one section at a time — `start_digest_run`
-once, then one `append_digest_section` per topic or feed so no single response has
-to emit the whole digest. If the digest resolves to nothing, reply that there is
-nothing yet and that the user should run `/workflow run interview-user`. Do not ask
-the user questions.
+Run the `{CURATE_DIGEST_SKILL}` skill. Read `digest_id` from `workflow_input` and
+resolve it with `read_digests` (returns `topics` and `rss_feeds`). If
+`workflow_input` has no `digest_id`, call `read_digests` with no id to list the
+user's digests and use the first; if there are none, reply that there is nothing
+yet and that the user should run `/workflow run interview-user`, then stop. Process
+each entry: for topics, curate (trusted sources first, open-web fallback), extract
+with `web_fetch`, skip already-seen via `read_digest_history`; for followed feeds,
+call `read_new_rss_items` instead of web-searching. Write the Axios digest one
+section at a time — `start_digest_run` once (pass the `digest_id` you resolved, and
+keep the returned `run_id`), then one `append_digest_section` per topic or feed so
+no single response has to emit the whole digest. Do not ask the user questions.
 """
 
 
@@ -89,10 +91,8 @@ class RunDigestSpec(AgentSpec):
         return ParallelSearchProvider(api_key=PARALLELAI_API_KEY)
 
     def build_llm(self) -> LLMProvider:
-        return AnthropicProvider(
-            app_id=RUN_DIGEST_AGENT_ID,
-            model=ANTHROPIC_MODEL,
-            api_key=ANTHROPIC_API_KEY,
+        return OpenAIProvider(
+            app_id=RUN_DIGEST_AGENT_ID, model=OPENAI_MODEL, api_key=OPENAI_API_KEY
         )
 
     def build_system_prompt(self) -> list[dict[str, Any]]:
@@ -125,7 +125,13 @@ def create_spec() -> RunDigestSpec:
 def build_workflow_spec() -> WorkflowSpec:
     return WorkflowSpec(
         workflow_id=RUN_DIGEST_WORKFLOW_ID,
-        tasks=[TaskSpec(task_id=RUN_DIGEST_TASK_ID, agent_spec=create_spec())],
+        tasks=[
+            TaskSpec(
+                task_id=RUN_DIGEST_TASK_ID,
+                agent_spec=create_spec(),
+                structured_output=DIGEST_OUTPUT_SCHEMA,
+            )
+        ],
         task_message=WorkflowTaskMessageSpec(skill_name=CURATE_DIGEST_SKILL),
     )
 

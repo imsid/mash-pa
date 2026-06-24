@@ -20,8 +20,6 @@ from psycopg.rows import DictRow, dict_row
 
 from mash.core.database import resolve_database_url
 
-DEFAULT_DIGEST_ID = "default"
-
 # Flipped once a connection has ensured the schema, so we do not re-run the DDL
 # on every call within a process. A mutable holder avoids a module `global`.
 _SCHEMA_READY = {"value": False}
@@ -66,23 +64,21 @@ async def _ensure_schema(conn: "psycopg.AsyncConnection[Any]") -> None:
             )
             """
         )
+        # A digest is a named collection (configured topics/feeds) or a freeform
+        # snapshot; either way it is a real row, and `source` records what created
+        # it (a workflow/agent id, e.g. `interview-user`, `github-digest`,
+        # `digest-curator`). `id` is DB-generated.
         await cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS pa_digests (
-                id TEXT PRIMARY KEY,
+                id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                 label TEXT NOT NULL,
+                source TEXT NOT NULL,
                 topic_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+                rss_feed_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
                 created_at TIMESTAMPTZ NOT NULL,
                 updated_at TIMESTAMPTZ NOT NULL
             )
-            """
-        )
-        # A digest can mix topics and followed creators/podcasts. ADD COLUMN IF
-        # NOT EXISTS upgrades an existing pa_digests table in place.
-        await cursor.execute(
-            """
-            ALTER TABLE pa_digests
-            ADD COLUMN IF NOT EXISTS rss_feed_ids JSONB NOT NULL DEFAULT '[]'::jsonb
             """
         )
         # Followed YouTube channels / podcasts. Resolved once at subscribe time
@@ -103,34 +99,33 @@ async def _ensure_schema(conn: "psycopg.AsyncConnection[Any]") -> None:
             )
             """
         )
-        # A digest run is one execution; its sections (cards) are written one at
-        # a time so no single LLM generation has to emit the whole digest.
+        # A digest run is one execution of a digest; its sections (cards) are
+        # written one at a time so no single LLM generation has to emit the whole
+        # digest. Every run belongs to a `pa_digests` row. The run title + lead
+        # are full-text searchable too, not just sections.
         await cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS pa_digest_runs (
-                id BIGSERIAL PRIMARY KEY,
-                digest_id TEXT NOT NULL,
+                id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                digest_id BIGINT NOT NULL
+                    REFERENCES pa_digests (id) ON DELETE CASCADE,
                 title TEXT NOT NULL,
                 lead TEXT NOT NULL DEFAULT '',
-                generated_at TIMESTAMPTZ NOT NULL
+                generated_at TIMESTAMPTZ NOT NULL,
+                search_tsv TSVECTOR GENERATED ALWAYS AS (
+                    to_tsvector('english', title || ' ' || lead)
+                ) STORED
             )
             """
         )
-        # Make the run title + lead full-text searchable too, not just sections
-        # (a user searching "open source" expects to match the digest's title).
-        # ADD COLUMN IF NOT EXISTS upgrades an existing table in place.
-        await cursor.execute(
-            """
-            ALTER TABLE pa_digest_runs
-            ADD COLUMN IF NOT EXISTS search_tsv TSVECTOR GENERATED ALWAYS AS (
-                to_tsvector('english', title || ' ' || lead)
-            ) STORED
-            """
-        )
+        # Sections carry `digest_id` (denormalized from the run) alongside
+        # `run_id` so a digest's cards are directly queryable without the join.
         await cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS pa_digest_sections (
-                id BIGSERIAL PRIMARY KEY,
+                id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                digest_id BIGINT NOT NULL
+                    REFERENCES pa_digests (id) ON DELETE CASCADE,
                 run_id BIGINT NOT NULL
                     REFERENCES pa_digest_runs (id) ON DELETE CASCADE,
                 position INT NOT NULL,
@@ -143,6 +138,12 @@ async def _ensure_schema(conn: "psycopg.AsyncConnection[Any]") -> None:
                     to_tsvector('english', heading || ' ' || content)
                 ) STORED
             )
+            """
+        )
+        await cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_pa_digest_runs_digest
+            ON pa_digest_runs (digest_id, generated_at DESC)
             """
         )
         await cursor.execute(
@@ -241,12 +242,12 @@ async def upsert_topics(topics: list[dict[str, Any]]) -> None:
 
 
 async def list_digests() -> list[dict[str, Any]]:
-    """Return every named digest, ordered by id."""
+    """Return every digest, ordered by id."""
     conn = await _connect()
     try:
         async with conn.cursor() as cursor:
             await cursor.execute(
-                "SELECT id, label, topic_ids, rss_feed_ids "
+                "SELECT id, label, source, topic_ids, rss_feed_ids "
                 "FROM pa_digests ORDER BY id"
             )
             return list(await cursor.fetchall())
@@ -254,26 +255,63 @@ async def list_digests() -> list[dict[str, Any]]:
         await conn.close()
 
 
-async def get_digest(digest_id: str) -> Optional[dict[str, Any]]:
+async def list_digest_configs() -> list[dict[str, Any]]:
+    """Return every digest's configuration with run stats: its label, source,
+    the resolved topic and feed labels it contains, run count, and last run time.
+    Powers `/digest config`. Ids that no longer resolve fall back to the raw id."""
     conn = await _connect()
     try:
         async with conn.cursor() as cursor:
             await cursor.execute(
-                "SELECT id, label, topic_ids, rss_feed_ids "
+                """
+                SELECT d.id, d.label, d.source, d.topic_ids, d.rss_feed_ids,
+                       count(r.id) AS runs,
+                       max(r.generated_at) AS last_run
+                FROM pa_digests d
+                LEFT JOIN pa_digest_runs r ON r.digest_id = d.id
+                GROUP BY d.id
+                ORDER BY d.id
+                """
+            )
+            rows = list(await cursor.fetchall())
+    finally:
+        await conn.close()
+    topic_labels = {row["id"]: row["label"] for row in await list_topics()}
+    feed_labels = {row["id"]: row["label"] for row in await list_rss_feeds()}
+    for row in rows:
+        row["topics"] = [
+            topic_labels.get(str(tid), str(tid))
+            for tid in (row.pop("topic_ids") or [])
+        ]
+        row["feeds"] = [
+            feed_labels.get(str(fid), str(fid))
+            for fid in (row.pop("rss_feed_ids") or [])
+        ]
+    return rows
+
+
+async def get_digest(digest_id: int) -> Optional[dict[str, Any]]:
+    conn = await _connect()
+    try:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT id, label, source, topic_ids, rss_feed_ids "
                 "FROM pa_digests WHERE id = %s",
-                (str(digest_id),),
+                (int(digest_id),),
             )
             return await cursor.fetchone()
     finally:
         await conn.close()
 
 
-async def upsert_digest(
-    digest_id: str,
+async def create_digest(
     label: str,
-    topic_ids: list[str],
+    source: str,
+    topic_ids: Optional[list[str]] = None,
     rss_feed_ids: Optional[list[str]] = None,
-) -> None:
+) -> int:
+    """Insert a new digest and return its DB-generated id. `source` records what
+    created it (a workflow/agent id)."""
     now = _now()
     conn = await _connect()
     try:
@@ -281,28 +319,60 @@ async def upsert_digest(
             await cursor.execute(
                 """
                 INSERT INTO pa_digests
-                    (id, label, topic_ids, rss_feed_ids, created_at, updated_at)
+                    (label, source, topic_ids, rss_feed_ids, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET
-                    label = EXCLUDED.label,
-                    topic_ids = EXCLUDED.topic_ids,
-                    rss_feed_ids = EXCLUDED.rss_feed_ids,
-                    updated_at = EXCLUDED.updated_at
+                RETURNING id
                 """,
                 (
-                    str(digest_id),
                     str(label),
-                    json.dumps([str(t) for t in topic_ids]),
+                    str(source),
+                    json.dumps([str(t) for t in (topic_ids or [])]),
                     json.dumps([str(f) for f in (rss_feed_ids or [])]),
                     now,
                     now,
                 ),
             )
+            row = await cursor.fetchone()
+            return int(row["id"])
     finally:
         await conn.close()
 
 
-async def resolve_digest_topics(digest_id: str) -> list[dict[str, Any]]:
+async def update_digest(
+    digest_id: int,
+    label: str,
+    topic_ids: list[str],
+    rss_feed_ids: Optional[list[str]] = None,
+) -> bool:
+    """Update an existing digest's label and contents. Returns False if no such
+    digest exists."""
+    now = _now()
+    conn = await _connect()
+    try:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                """
+                UPDATE pa_digests SET
+                    label = %s,
+                    topic_ids = %s,
+                    rss_feed_ids = %s,
+                    updated_at = %s
+                WHERE id = %s
+                """,
+                (
+                    str(label),
+                    json.dumps([str(t) for t in topic_ids]),
+                    json.dumps([str(f) for f in (rss_feed_ids or [])]),
+                    now,
+                    int(digest_id),
+                ),
+            )
+            return cursor.rowcount > 0
+    finally:
+        await conn.close()
+
+
+async def resolve_digest_topics(digest_id: int) -> list[dict[str, Any]]:
     """Resolve a digest id to its topic rows, preserving the digest's order."""
     digest = await get_digest(digest_id)
     if digest is None:
@@ -314,7 +384,7 @@ async def resolve_digest_topics(digest_id: str) -> list[dict[str, Any]]:
     return [by_id[tid] for tid in ordered_ids if tid in by_id]
 
 
-async def resolve_digest_rss_feeds(digest_id: str) -> list[dict[str, Any]]:
+async def resolve_digest_rss_feeds(digest_id: int) -> list[dict[str, Any]]:
     """Resolve a digest id to its followed feed rows, preserving digest order."""
     digest = await get_digest(digest_id)
     if digest is None:
@@ -327,12 +397,20 @@ async def resolve_digest_rss_feeds(digest_id: str) -> list[dict[str, Any]]:
 
 
 async def clear_all() -> None:
-    """Remove all topics, followed feeds, and digests (used by reset). Digest
-    runs are kept as history."""
+    """Reset saved interests: remove all topics and followed feeds, and drop
+    digest definitions that were never run. Digests with run history are kept (a
+    delete would cascade their runs), so past digests stay viewable."""
     conn = await _connect()
     try:
         async with conn.cursor() as cursor:
-            await cursor.execute("DELETE FROM pa_digests")
+            await cursor.execute(
+                """
+                DELETE FROM pa_digests d
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM pa_digest_runs r WHERE r.digest_id = d.id
+                )
+                """
+            )
             await cursor.execute("DELETE FROM pa_topics")
             await cursor.execute("DELETE FROM pa_rss_feeds")
     finally:
@@ -425,9 +503,34 @@ async def delete_rss_feed(feed_id: str) -> bool:
 # --- Digest runs + sections (output + skip-seen) ----------------------------
 
 
-async def start_digest_run(digest_id: str, title: str, lead: str = "") -> int:
-    """Open a digest run and return its id. Sections are appended one at a
-    time so no single generation has to emit the whole digest."""
+async def start_digest_run(
+    title: str,
+    *,
+    digest_id: Optional[int] = None,
+    workflow: Optional[str] = None,
+    lead: str = "",
+) -> dict[str, int]:
+    """Open a digest run and return its digest id and run id. Provide exactly
+    one of:
+
+    - `digest_id`: attach the run to an existing digest (a configured digest, or
+      one named in the workflow input).
+    - `workflow`: create a freeform digest on the fly (label = `title`, `source`
+      = `workflow`, no topics) and run under it.
+
+    Sections are appended one at a time so no single generation has to emit the
+    whole digest.
+    """
+    has_digest = digest_id is not None
+    has_workflow = bool(workflow and str(workflow).strip())
+    if has_digest == has_workflow:
+        raise ValueError("provide exactly one of `digest_id` or `workflow`")
+
+    if has_workflow:
+        digest_id = await create_digest(
+            label=str(title), source=str(workflow).strip()
+        )
+
     conn = await _connect()
     try:
         async with conn.cursor() as cursor:
@@ -437,12 +540,12 @@ async def start_digest_run(digest_id: str, title: str, lead: str = "") -> int:
                 VALUES (%s, %s, %s, %s)
                 RETURNING id
                 """,
-                (str(digest_id), str(title), str(lead), _now()),
+                (int(digest_id), str(title), str(lead), _now()),
             )
             row = await cursor.fetchone()
             if row is None:
                 raise RuntimeError("failed to insert digest run")
-            return int(row["id"])
+            return {"digest_id": int(digest_id), "run_id": int(row["id"])}
     finally:
         await conn.close()
 
@@ -454,16 +557,18 @@ async def append_digest_section(
     content: str,
     seen: dict[str, Any],
 ) -> int:
-    """Append one section (card) to a run. Position is assigned in append
-    order. Returns the section id."""
+    """Append one section (card) to a run. The section's `digest_id` is derived
+    from the run. Position is assigned in append order. Returns the section id."""
     conn = await _connect()
     try:
         async with conn.cursor() as cursor:
             await cursor.execute(
                 """
                 INSERT INTO pa_digest_sections
-                    (run_id, position, topic_id, heading, content, seen, created_at)
+                    (digest_id, run_id, position, topic_id, heading, content,
+                     seen, created_at)
                 VALUES (
+                    (SELECT digest_id FROM pa_digest_runs WHERE id = %s),
                     %s,
                     (SELECT COALESCE(MAX(position) + 1, 0)
                        FROM pa_digest_sections WHERE run_id = %s),
@@ -472,6 +577,7 @@ async def append_digest_section(
                 RETURNING id
                 """,
                 (
+                    int(run_id),
                     int(run_id),
                     int(run_id),
                     str(topic_id),
@@ -544,6 +650,45 @@ async def get_run(run_id: int) -> Optional[dict[str, Any]]:
             return await cursor.fetchone()
     finally:
         await conn.close()
+
+
+async def get_run_for_digest(
+    digest_id: int, run_id: int
+) -> Optional[dict[str, Any]]:
+    """Fetch a run only if it belongs to the given digest (the addressing the
+    `/digest <digest_id> <run_id>` command uses)."""
+    conn = await _connect()
+    try:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                "SELECT id, digest_id, title, lead, generated_at "
+                "FROM pa_digest_runs WHERE id = %s AND digest_id = %s",
+                (int(run_id), int(digest_id)),
+            )
+            return await cursor.fetchone()
+    finally:
+        await conn.close()
+
+
+async def digest_run_payload(run: dict[str, Any]) -> dict[str, Any]:
+    """Build the structured render payload for a run — its ids, title, lead, and
+    ordered sections. Shared by the CLI renderer and the workflow's structured
+    output so both render the same shape."""
+    sections = await get_run_sections(int(run["id"]))
+    return {
+        "digest_id": int(run["digest_id"]),
+        "run_id": int(run["id"]),
+        "title": str(run["title"]),
+        "lead": str(run.get("lead") or ""),
+        "sections": [
+            {
+                "position": int(s["position"]),
+                "heading": str(s["heading"]),
+                "content": str(s["content"]),
+            }
+            for s in sections
+        ],
+    }
 
 
 async def get_run_sections(run_id: int) -> list[dict[str, Any]]:

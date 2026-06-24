@@ -21,9 +21,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from mash.core.llm import GemmaProvider, LLMProvider
+from mash.core.llm import GeminiProvider, GemmaProvider, LLMProvider
 
-from ._base import GEMMA_MODEL, OPENROUTER_API_KEY, OSS_BASE_URL
+from ._base import (
+    GEMINI_API_KEY,
+    GEMINI_MODEL,
+    GEMMA_MODEL,
+    OPENROUTER_API_KEY,
+    OSS_BASE_URL,
+)
 
 # OpenRouter provider-routing preferences, merged into every request's
 # `provider_options`. `require_parameters` restricts routing to backends that
@@ -47,4 +53,16 @@ def build_gemma_llm(app_id: str) -> LLMProvider:
         api_key=OPENROUTER_API_KEY,
         default_provider_options=_OPENROUTER_OPTIONS,
         on_tool_call_leak="raise",
+    )
+
+
+def build_gemini_llm(app_id: str) -> LLMProvider:
+    """Build the Gemini provider used by the digest-curator.
+
+    Runs on a Gemini frontier model over Google's Interactions API. The provider
+    rewrites the agent's `web_search`/`web_fetch` tools into Gemini's native
+    server-side `google_search`, so grounding comes from Google directly.
+    """
+    return GeminiProvider(
+        app_id=app_id, model=GEMINI_MODEL, api_key=GEMINI_API_KEY, web_search=True
     )
