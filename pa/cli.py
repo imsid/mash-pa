@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import importlib
-import json
 import os
 from typing import Any, Sequence
 
@@ -412,106 +411,6 @@ def _digest_command(ctx: Any, args: list[str]) -> None:
         renderer.error(f"/digest failed: {exc}")
 
 
-def _run_digest_workflow(shell: MashRemoteShell, original: Command, ctx: Any, args: list[str]) -> None:
-    """`/workflow run` for digest workflows: stream the run like the default
-    command, then render the digest from the task's structured output. All other
-    `/workflow` subcommands fall through to the default handler unchanged."""
-    subcommand = args[0].strip().lower() if args else "list"
-    if subcommand != "run" or len(args) < 2:
-        original.handler(ctx, args)
-        return
-    workflow_id = args[1].strip()
-    if workflow_id not in _DIGEST_WORKFLOW_IDS:
-        original.handler(ctx, args)
-        return
-
-    # Parse `[dedup_key] [--input JSON_OBJECT]` (mirrors the default command).
-    dedup_key = None
-    workflow_input = None
-    remaining = list(args[2:])
-    if "--input" in remaining:
-        idx = remaining.index("--input")
-        raw_input = " ".join(remaining[idx + 1 :]).strip()
-        if len(raw_input) >= 2 and raw_input[0] == raw_input[-1] and raw_input[0] in {"'", '"'}:
-            raw_input = raw_input[1:-1]
-        remaining = remaining[:idx]
-        try:
-            workflow_input = json.loads(raw_input)
-        except json.JSONDecodeError as exc:
-            ctx.renderer.error(f"Workflow input must be valid JSON: {exc.msg}")
-            return
-        if not isinstance(workflow_input, dict):
-            ctx.renderer.error("Workflow input must be a JSON object")
-            return
-    if len(remaining) > 1:
-        ctx.renderer.error("Usage: /workflow run <workflow_id> [dedup_key] [--input JSON_OBJECT]")
-        return
-    if remaining:
-        dedup_key = remaining[0].strip() or None
-
-    run = ctx.client.run_workflow(workflow_id, dedup_key=dedup_key, workflow_input=workflow_input)
-    ctx.renderer.info(f"Workflow: {run.get('workflow_id') or workflow_id}")
-    run_id = str(run.get("run_id") or "")
-    ctx.renderer.info(f"Run ID: {run_id}")
-    if not run_id:
-        ctx.renderer.info(f"Status: {run.get('status') or ''}")
-        return
-
-    structured_output: dict | None = None
-    try:
-        for event in ctx.client.stream_workflow_run(workflow_id, run_id):
-            event_name = str(event.get("event") or "")
-            payload = event.get("data")
-            if not isinstance(payload, dict):
-                continue
-            task_id = str(payload.get("task_id") or "")
-            task_agent_id = str(payload.get("task_agent_id") or "")
-            task_label = f"Workflow task {task_id}" if task_id else "Workflow task"
-
-            if event_name == "request.interaction.create":
-                shell._handle_interaction(
-                    ctx, str(payload.get("request_id") or ""), payload,
-                    agent_id=task_agent_id or ctx.agent_id,
-                )
-            elif event_name == "request.interaction.ack":
-                shell._render_interaction_ack(payload)
-            elif event_name == "workflow.status":
-                status = str(payload.get("status") or "")
-                if status:
-                    ctx.renderer.info(f"Workflow status: {status}")
-            elif event_name == "workflow.task.started":
-                ctx.renderer.info(f"{task_label} started")
-            elif event_name == "workflow.task.completed":
-                ctx.renderer.info(f"{task_label} completed")
-            elif event_name == "workflow.task.error":
-                ctx.renderer.error(f"{task_label} error")
-            elif event_name == "agent.trace":
-                shell.render_runtime_trace_payload(
-                    payload, trace_label=task_label, agent_id=task_agent_id or None
-                )
-            elif event_name == "request.completed":
-                response_payload = payload.get("response")
-                if isinstance(response_payload, dict):
-                    candidate = response_payload.get("structured_output")
-                    if isinstance(candidate, dict):
-                        structured_output = candidate
-            elif event_name == "request.error":
-                ctx.renderer.error(str(payload.get("error") or "workflow task request failed"))
-            elif event_name == "workflow.error":
-                ctx.renderer.error(str(payload.get("error") or "workflow stream failed"))
-                return
-    finally:
-        shell.chain_renderer.finish_trace()
-
-    if structured_output is not None:
-        _render_digest_payload(ctx.renderer, structured_output, show_command=True)
-    else:
-        ctx.renderer.warn(
-            "Workflow finished but returned no digest output. "
-            "View the latest with `/digest`."
-        )
-
-
 def _register_pa_commands(shell: MashRemoteShell) -> None:
     """Register PA-specific slash commands on the REPL shell."""
     shell.register_command(
@@ -531,21 +430,14 @@ def _register_pa_commands(shell: MashRemoteShell) -> None:
             handler=_digest_command,
         )
     )
-    # Wrap the default `/workflow` so digest workflows render their structured
-    # output as a digest. Other subcommands fall through unchanged.
-    original_workflow = shell.command_registry.get("workflow")
-    if original_workflow is not None:
-        shell.command_registry.unregister("workflow")
-        shell.register_command(
-            Command(
-                name="workflow",
-                help=original_workflow.help,
-                handler=lambda ctx, args: _run_digest_workflow(
-                    shell, original_workflow, ctx, args
-                ),
-                aliases=original_workflow.aliases,
-            )
-        )
+    # Render each digest workflow's structured output as a digest. mash's default
+    # `/workflow run` calls this renderer on the task's `request.completed`, so we
+    # no longer fork the command — we just register how to draw the payload.
+    def _render_digest_output(_task_id: str, _agent_id: str, data: dict) -> None:
+        _render_digest_payload(shell.renderer, data, show_command=True)
+
+    for workflow_id in _DIGEST_WORKFLOW_IDS:
+        shell.register_structured_output_renderer(workflow_id, _render_digest_output)
 
 
 def _run_repl(
