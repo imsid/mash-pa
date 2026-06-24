@@ -7,3 +7,4 @@ build/
 *.spec
 .env
 .*_history
+.DS_Store

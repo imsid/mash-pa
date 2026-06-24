@@ -8,7 +8,7 @@ from typing import Any, Dict
 from mash.tools.base import ToolResult
 
 from .. import _store
-from ._base import _BaseTool, _ok
+from ._base import _BaseTool, _ok, _optional_digest_id
 
 
 class ReadDigestHistoryTool(_BaseTool):
@@ -52,17 +52,26 @@ class StartDigestRunTool(_BaseTool):
     name = "start_digest_run"
     parallel_safe = False
     description = (
-        "Open a new digest run and get back its `run_id`. Call this once before "
-        "writing sections. Pass a `title` and an optional `lead` (the '1 big "
-        "thing'). For a saved digest include its `digest_id`; omit it for a "
-        "freeform digest."
+        "Open a new digest run and get back its `digest_id` and `run_id`. Call "
+        "this once before writing sections. Pass a `title` and an optional `lead` "
+        "(the '1 big thing'). Provide exactly one of: `digest_id` to attach the "
+        "run to an existing digest (a configured digest, or one named in the "
+        "workflow input), or `workflow` (this workflow/agent's id) to create a "
+        "freeform digest on the fly for a one-off snapshot."
     )
     parameters = {
         "type": "object",
         "properties": {
             "digest_id": {
+                "type": "integer",
+                "description": "Existing digest id to attach this run to.",
+            },
+            "workflow": {
                 "type": "string",
-                "description": "Digest id; omit for a freeform digest.",
+                "description": (
+                    "This workflow/agent's id; creates a freeform digest. Use "
+                    "instead of `digest_id` for a one-off snapshot."
+                ),
             },
             "title": {"type": "string"},
             "lead": {
@@ -79,12 +88,32 @@ class StartDigestRunTool(_BaseTool):
         title = str(args.get("title") or "").strip()
         if not title:
             return ToolResult.error("`title` is required.")
-        run_id = await _store.start_digest_run(
-            str(args.get("digest_id") or ""),
-            title,
-            str(args.get("lead") or ""),
-        )
-        return _ok({"run_id": run_id})
+        # A missing/zero/empty `digest_id` (a model's 0 placeholder) means "not
+        # provided" and routes to the freeform `workflow` path.
+        try:
+            digest_id = _optional_digest_id(args.get("digest_id"))
+        except ValueError as exc:
+            return ToolResult.error(str(exc))
+        workflow = str(args.get("workflow") or "").strip()
+        # An explicit existing digest wins; otherwise open a freeform digest for
+        # the named workflow.
+        if digest_id is not None:
+            workflow = ""
+        elif not workflow:
+            return ToolResult.error(
+                "Provide a `digest_id` (an existing digest) or a `workflow` "
+                "(to open a freeform digest)."
+            )
+        try:
+            result = await _store.start_digest_run(
+                title,
+                digest_id=digest_id,
+                workflow=workflow or None,
+                lead=str(args.get("lead") or ""),
+            )
+        except ValueError as exc:
+            return ToolResult.error(str(exc))
+        return _ok(result)
 
 
 class AppendDigestSectionTool(_BaseTool):

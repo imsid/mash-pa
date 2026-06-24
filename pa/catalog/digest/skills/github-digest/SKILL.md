@@ -17,10 +17,11 @@ Record every section with an empty `seen` (`{}`).
 ## If GitHub is not configured
 
 If the GitHub tools (`get_me`, `search_pull_requests`, …) are not available, this
-deployment has no GitHub connection. Open a run titled "Your GitHub world" and write
-one section explaining that `GITHUB_MCP_PAT` (a GitHub personal access token) must
-be set in the deployment's `.env` and the host restarted, then stop. Do not ask the
-user questions.
+deployment has no GitHub connection. Open a run with `start_digest_run` (`title`
+"Your GitHub world", `workflow` `"github-digest"`) and write one section explaining
+that `GITHUB_MCP_PAT` (a GitHub personal access token) must be set in the
+deployment's `.env` and the host restarted, then stop. Do not ask the user
+questions.
 
 ## Gather
 
@@ -38,8 +39,9 @@ can:
 ## Open the run
 
 Call `start_digest_run` once with `title` "Your GitHub world" and, if one item
-clearly dominates, a `lead` (the single most pressing thing, 2–3 sentences). Omit
-`digest_id` — this is not a saved digest. Keep the returned `run_id`.
+clearly dominates, a `lead` (the single most pressing thing, 2–3 sentences). Pass
+`workflow` `"github-digest"` (not a `digest_id`) — this is a freeform snapshot, so
+the digest is created on the fly. Keep the returned `digest_id` and `run_id`.
 
 ## Write one section per group
 

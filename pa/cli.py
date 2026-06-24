@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import importlib
+import json
 import os
 from typing import Any, Sequence
 
@@ -20,6 +21,11 @@ from mash.cli.render import RichRenderer
 from mash.cli.shell import MashRemoteShell, ShellTarget
 
 from . import store
+
+# Workflows whose final task returns a digest structured output (see
+# `pa.catalog.digest._output.DIGEST_OUTPUT_SCHEMA`). For these, the CLI renders
+# the digest from that structured output once the run completes.
+_DIGEST_WORKFLOW_IDS = frozenset({"run-digest", "github-digest"})
 
 PA_DEFAULT_API_BASE_URL = os.environ.get(
     "PA_API_BASE_URL",
@@ -255,7 +261,9 @@ def _interests_command(shell: MashRemoteShell, ctx: Any, args: list[str]) -> Non
     subcommand = args[0].strip().lower() if args else "show"
     if subcommand in ("", "show", "view", "list"):
         shell.handle_repl_message(
-            ctx, "List my saved digest topics and digests."
+            ctx,
+            "List my saved digest topics, the YouTube creators and podcasts I "
+            "follow, and my digests.",
         )
         return
     if subcommand == "reset":
@@ -271,11 +279,35 @@ def _interests_command(shell: MashRemoteShell, ctx: Any, args: list[str]) -> Non
     ctx.renderer.error("Usage: /interests [show|reset]")
 
 
+def _render_digest_payload(
+    renderer: Any, payload: dict, *, show_command: bool = False
+) -> None:
+    """Dumb-render a digest payload — `{title, lead, sections:[{position,
+    heading, content}], digest_id, run_id}` — as markdown. Shared by `/digest`
+    and the workflow render (which sets `show_command` to print the re-view
+    command). The same shape comes from the store and from a workflow's
+    structured output."""
+    parts = [f"# {payload.get('title') or ''}"]
+    lead = str(payload.get("lead") or "").strip()
+    if lead:
+        parts.append(f"**1 big thing:** {lead}")
+    sections = sorted(
+        payload.get("sections") or [], key=lambda s: int(s.get("position") or 0)
+    )
+    parts.extend(str(s.get("content") or "").strip() for s in sections)
+    renderer.markdown("\n\n".join(parts))
+    if show_command:
+        digest_id = payload.get("digest_id")
+        run_id = payload.get("run_id")
+        if digest_id is not None and run_id is not None:
+            renderer.info(f"View this digest later: /digest {digest_id} {run_id}")
+
+
 def _digest_command(ctx: Any, args: list[str]) -> None:
     """View past digests directly from the Postgres store (no agent).
 
-    `/digest` latest · `/digest list [N]` · `/digest <run_id>` ·
-    `/digest search <query>`.
+    `/digest` latest · `/digest list [N]` · `/digest config` ·
+    `/digest <digest_id> <run_id>` · `/digest <run_id>` · `/digest search <query>`.
     """
     # Imported lazily so the CLI (and its PyInstaller binary) does not pull in
     # psycopg and the catalog unless a digest command is actually used.
@@ -298,13 +330,8 @@ def _digest_command(ctx: Any, args: list[str]) -> None:
         )
 
     def _render_run(run: dict) -> None:
-        sections = asyncio.run(digest_store.get_run_sections(int(run["id"])))
-        parts = [f"# {run['title']}"]
-        lead = str(run.get("lead") or "").strip()
-        if lead:
-            parts.append(f"**1 big thing:** {lead}")
-        parts.extend(str(s["content"]).strip() for s in sections)
-        renderer.markdown("\n\n".join(parts))
+        payload = asyncio.run(digest_store.digest_run_payload(run))
+        _render_digest_payload(renderer, payload)
 
     try:
         sub = args[0].strip().lower() if args else ""
@@ -315,6 +342,32 @@ def _digest_command(ctx: Any, args: list[str]) -> None:
                 renderer.info("No digests yet. Generate one with `/workflow run run-digest`.")
                 return
             _run_table(rows)
+            return
+        if sub == "config":
+            rows = asyncio.run(digest_store.list_digest_configs())
+            if not rows:
+                renderer.info(
+                    "No digests configured. Set up interests with "
+                    "`/workflow run interview-user`."
+                )
+                return
+            renderer.table(
+                ["ID", "Label", "Source", "Topics", "Feeds", "Runs", "Last run"],
+                [
+                    [
+                        str(r["id"]),
+                        str(r["label"]),
+                        str(r["source"]),
+                        ", ".join(r["topics"])
+                        if r["topics"]
+                        else ("(freeform)" if not r["feeds"] else "—"),
+                        ", ".join(r["feeds"]) if r["feeds"] else "—",
+                        str(r["runs"]),
+                        str(r["last_run"] or "—"),
+                    ]
+                    for r in rows
+                ],
+            )
             return
         if sub == "search":
             query = " ".join(args[1:]).strip()
@@ -327,15 +380,28 @@ def _digest_command(ctx: Any, args: list[str]) -> None:
                 return
             _run_table(rows)
             return
+        # `/digest <digest_id> <run_id>` — a run addressed within its digest.
+        if len(args) >= 2 and args[0].isdigit() and args[1].isdigit():
+            digest_id, run_id = int(args[0]), int(args[1])
+            run = asyncio.run(digest_store.get_run_for_digest(digest_id, run_id))
+            if run is None:
+                renderer.error(f"No run {run_id} in digest {digest_id}.")
+                return
+            _render_run(run)
+            return
+        # `/digest <run_id>` — a run by its id alone.
         if sub.isdigit():
             run = asyncio.run(digest_store.get_run(int(sub)))
             if run is None:
-                renderer.error(f"No digest with id {sub}.")
+                renderer.error(f"No digest run with id {sub}.")
                 return
             _render_run(run)
             return
         if sub:
-            renderer.error("Usage: /digest [list N | search <query> | <run_id>]")
+            renderer.error(
+                "Usage: /digest [list N | config | search <query> | "
+                "<digest_id> <run_id> | <run_id>]"
+            )
             return
         latest = asyncio.run(digest_store.latest_run())
         if latest is None:
@@ -344,6 +410,106 @@ def _digest_command(ctx: Any, args: list[str]) -> None:
         _render_run(latest)
     except Exception as exc:
         renderer.error(f"/digest failed: {exc}")
+
+
+def _run_digest_workflow(shell: MashRemoteShell, original: Command, ctx: Any, args: list[str]) -> None:
+    """`/workflow run` for digest workflows: stream the run like the default
+    command, then render the digest from the task's structured output. All other
+    `/workflow` subcommands fall through to the default handler unchanged."""
+    subcommand = args[0].strip().lower() if args else "list"
+    if subcommand != "run" or len(args) < 2:
+        original.handler(ctx, args)
+        return
+    workflow_id = args[1].strip()
+    if workflow_id not in _DIGEST_WORKFLOW_IDS:
+        original.handler(ctx, args)
+        return
+
+    # Parse `[dedup_key] [--input JSON_OBJECT]` (mirrors the default command).
+    dedup_key = None
+    workflow_input = None
+    remaining = list(args[2:])
+    if "--input" in remaining:
+        idx = remaining.index("--input")
+        raw_input = " ".join(remaining[idx + 1 :]).strip()
+        if len(raw_input) >= 2 and raw_input[0] == raw_input[-1] and raw_input[0] in {"'", '"'}:
+            raw_input = raw_input[1:-1]
+        remaining = remaining[:idx]
+        try:
+            workflow_input = json.loads(raw_input)
+        except json.JSONDecodeError as exc:
+            ctx.renderer.error(f"Workflow input must be valid JSON: {exc.msg}")
+            return
+        if not isinstance(workflow_input, dict):
+            ctx.renderer.error("Workflow input must be a JSON object")
+            return
+    if len(remaining) > 1:
+        ctx.renderer.error("Usage: /workflow run <workflow_id> [dedup_key] [--input JSON_OBJECT]")
+        return
+    if remaining:
+        dedup_key = remaining[0].strip() or None
+
+    run = ctx.client.run_workflow(workflow_id, dedup_key=dedup_key, workflow_input=workflow_input)
+    ctx.renderer.info(f"Workflow: {run.get('workflow_id') or workflow_id}")
+    run_id = str(run.get("run_id") or "")
+    ctx.renderer.info(f"Run ID: {run_id}")
+    if not run_id:
+        ctx.renderer.info(f"Status: {run.get('status') or ''}")
+        return
+
+    structured_output: dict | None = None
+    try:
+        for event in ctx.client.stream_workflow_run(workflow_id, run_id):
+            event_name = str(event.get("event") or "")
+            payload = event.get("data")
+            if not isinstance(payload, dict):
+                continue
+            task_id = str(payload.get("task_id") or "")
+            task_agent_id = str(payload.get("task_agent_id") or "")
+            task_label = f"Workflow task {task_id}" if task_id else "Workflow task"
+
+            if event_name == "request.interaction.create":
+                shell._handle_interaction(
+                    ctx, str(payload.get("request_id") or ""), payload,
+                    agent_id=task_agent_id or ctx.agent_id,
+                )
+            elif event_name == "request.interaction.ack":
+                shell._render_interaction_ack(payload)
+            elif event_name == "workflow.status":
+                status = str(payload.get("status") or "")
+                if status:
+                    ctx.renderer.info(f"Workflow status: {status}")
+            elif event_name == "workflow.task.started":
+                ctx.renderer.info(f"{task_label} started")
+            elif event_name == "workflow.task.completed":
+                ctx.renderer.info(f"{task_label} completed")
+            elif event_name == "workflow.task.error":
+                ctx.renderer.error(f"{task_label} error")
+            elif event_name == "agent.trace":
+                shell.render_runtime_trace_payload(
+                    payload, trace_label=task_label, agent_id=task_agent_id or None
+                )
+            elif event_name == "request.completed":
+                response_payload = payload.get("response")
+                if isinstance(response_payload, dict):
+                    candidate = response_payload.get("structured_output")
+                    if isinstance(candidate, dict):
+                        structured_output = candidate
+            elif event_name == "request.error":
+                ctx.renderer.error(str(payload.get("error") or "workflow task request failed"))
+            elif event_name == "workflow.error":
+                ctx.renderer.error(str(payload.get("error") or "workflow stream failed"))
+                return
+    finally:
+        shell.chain_renderer.finish_trace()
+
+    if structured_output is not None:
+        _render_digest_payload(ctx.renderer, structured_output, show_command=True)
+    else:
+        ctx.renderer.warn(
+            "Workflow finished but returned no digest output. "
+            "View the latest with `/digest`."
+        )
 
 
 def _register_pa_commands(shell: MashRemoteShell) -> None:
@@ -358,10 +524,28 @@ def _register_pa_commands(shell: MashRemoteShell) -> None:
     shell.register_command(
         Command(
             name="digest",
-            help="View past digests (/digest [list N | search <query> | <run_id>])",
+            help=(
+                "View past digests (/digest [list N | config | search <query> | "
+                "<digest_id> <run_id> | <run_id>])"
+            ),
             handler=_digest_command,
         )
     )
+    # Wrap the default `/workflow` so digest workflows render their structured
+    # output as a digest. Other subcommands fall through unchanged.
+    original_workflow = shell.command_registry.get("workflow")
+    if original_workflow is not None:
+        shell.command_registry.unregister("workflow")
+        shell.register_command(
+            Command(
+                name="workflow",
+                help=original_workflow.help,
+                handler=lambda ctx, args: _run_digest_workflow(
+                    shell, original_workflow, ctx, args
+                ),
+                aliases=original_workflow.aliases,
+            )
+        )
 
 
 def _run_repl(

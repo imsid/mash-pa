@@ -34,7 +34,7 @@ def build_pool(workspace_root: Path | None = None) -> AgentPool:
     # Digest workflows; their workflow-only task agents register automatically.
     for workflow in build_digest_workflow_specs():
         builder.workflow(workflow)
-    return builder.build()
+    return builder.enable_masher(True).build()
 
 
 def serve(

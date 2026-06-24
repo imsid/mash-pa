@@ -15,24 +15,35 @@ A digest has two kinds of source: **topics** (curated by web search) and
 **followed feeds** (`rss_feed_ids` — YouTube creators and podcasts, fetched by
 RSS). Process both.
 
-- **Workflow / saved digest:** read `digest_id` from `workflow_input` (default
-  `default`). Call `read_digests` with that `digest_id`; it returns `topics`
-  (topic rows) and `rss_feeds` (followed creators/podcasts). If both are empty,
-  stop and reply: "Nothing set up yet — run `/workflow run interview-user` to set
-  up your interests." Do not call `AskUser`.
+- **Saved digest (by id or name):** resolve the `digest_id` first, then call
+  `read_digests` with it to get `topics` (topic rows) and `rss_feeds` (followed
+  creators/podcasts).
+  - If `workflow_input` carries a `digest_id`, use it directly.
+  - If the user names a saved digest ("generate my Daily Brief digest"), **do not
+    guess an id.** First call `read_digests` with **no** `digest_id` to list every
+    saved digest, match the user's words to a digest `label` (case-insensitive,
+    accept the obvious close match — "Daily Brief" → "Daily Briefing"), and take
+    that digest's `id`. Then call `read_digests` with that `id`.
+  - If no saved digest matches the name, say so plainly and offer to create it (via
+    the digest concierge) or run a one-off from their topics — do not silently fall
+    back. If the matched digest resolves to empty `topics` and `rss_feeds`, say it
+    is empty and stop. Do not call `AskUser`.
 - **Freeform:** build a single ad-hoc topic from the user's request (pick a label,
   intent, sensible `recency_days` and `max_items`, and any sources they named).
-  Omit `digest_id` when recording it. **Exception:** if the request names a
-  specific YouTube creator or podcast (e.g. "latest episodes of the Training Data
-  podcast"), treat it as an ad-hoc feed, not a web topic — see "Ad-hoc feeds"
-  below — and do not web-search it.
+  This is not a saved digest, so the run is opened with `workflow` rather than a
+  `digest_id` (see "Open the run"). **Exception:** if the request names a specific
+  YouTube creator or podcast (e.g. "latest episodes of the Training Data podcast"),
+  treat it as an ad-hoc feed, not a web topic — see "Ad-hoc feeds" below — and do
+  not web-search it.
 
 ## Open the run
 
 Call `start_digest_run` once with a `title` (the digest's label, or the freeform
 topic label) and, if you can frame it up front, a `lead` — the "1 big thing", the
-single most important item across all topics, in 2–3 sentences. Include `digest_id`
-for a saved digest; omit it for a freeform digest. Keep the returned `run_id`.
+single most important item across all topics, in 2–3 sentences. Pass **exactly one**
+of: `digest_id` for a saved digest, or `workflow` `"digest-curator"` for a freeform
+digest (this creates the digest on the fly). Keep the returned `digest_id` and
+`run_id`.
 
 Then process each topic **one at a time**, finishing each as its own section
 before moving on, so no single response has to emit the whole digest.

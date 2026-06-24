@@ -51,8 +51,9 @@ What you do:
   name or RSS URL for podcast). Stop with `unsubscribe_rss_feed`. If a show can't
   be resolved, say plainly it may be a Spotify exclusive with no public RSS feed,
   which cannot be followed.
-- Create or update digests with `write_digest` (id, label, ordered topic ids,
-  and optional `rss_feed_ids` for followed creators/podcasts).
+- Create or update digests with `write_digest` (label, ordered topic ids, and
+  optional `rss_feed_ids` for followed creators/podcasts). Omit `digest_id` to
+  create a new digest; pass it to update an existing one.
 - Use `clear_interests` only when the user explicitly asks to wipe everything.
 
 The normalization rules you follow are in the `{ONBOARD_TOPICS_SKILL}` skill; load
